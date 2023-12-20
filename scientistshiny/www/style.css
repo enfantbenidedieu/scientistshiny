@@ -1,0 +1,33 @@
+* {
+    font-family: "Bookman Old Style", sans-serif !important;
+    font: size 11px;
+  }
+
+/* Change header text to imported font */
+
+h5{
+    font-weight: bold;
+    color : black;
+    text-align:center;
+    text-decoration: underline;
+}
+
+h6{
+    color : black;
+    text-align:left;
+    font-weight: bold;
+}
+
+body-title{
+    text-align : center
+}
+
+.navbar_id {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+nav {
+    background-color: blue;
+}

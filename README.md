@@ -32,6 +32,15 @@ You can install scientisttools using `pip` :
 pip install scientistshiny
 ```
 
+Examples are available
+
+```
+https://github.com/enfantbenidedieu/scientistshiny/blob/main/example/test_pcashiny.py
+https://github.com/enfantbenidedieu/scientistshiny/blob/main/example/test_pcashiny.ipynb
+https://github.com/enfantbenidedieu/scientistshiny/blob/main/example/test_cashiny.py
+https://github.com/enfantbenidedieu/scientistshiny/blob/main/example/test_mcashiny.py
+```
+
 ## Author
 
 Duvérier DJIFACK ZEBAZE ([duverierdjifack@gmail.com](duverierdjifack@gmail.com))

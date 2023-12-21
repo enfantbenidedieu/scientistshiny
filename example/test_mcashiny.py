@@ -2,7 +2,7 @@
 
 import pandas as pd
 from scientisttools.decomposition import MCA
-from scientistshiny.mca import MCAshiny
+from scientistshiny import MCAshiny
 
 
 href = "D:/Bureau/PythonProject/packages/scientistshiny/data/"

@@ -13,7 +13,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     long_description=long_description,
     packages=setuptools.find_packages(),
-    install_requires=["scientisttools>=0.1.3"
+    install_requires=["scientisttools>=0.1.3",
                       "numpy>=1.26.2",
                       "matplotlib>=3.5.3",
                       "scikit-learn>=1.2.2",

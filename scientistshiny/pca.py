@@ -67,9 +67,24 @@ class PCAshiny:
 
     Examples:
     ---------
-    > from scientisttools.decomposition import PCA
-    > from scientistshiny import PCAshiny
+    import pandas as pd
+    from scientisttools.decomposition import PCA
+    from scientistshiny import PCAshiny
 
+    href = "D:/Bureau/PythonProject/packages/scientistshiny/data/"
+    decathlon = pd.read_excel(href+"/decathlon2.xlsx",header=0,sheet_name=0,index_col=0)
+
+    acp = PCA(normalize=True,
+            n_components = None,
+            row_labels=decathlon.index[:23],
+            col_labels=decathlon.columns[:10],
+            row_sup_labels=decathlon.index[23:],
+            quanti_sup_labels=["Rank","Points"],
+            quali_sup_labels=["Competition"],
+            parallelize=True).fit(decathlon)
+    
+    app = PCAshiny(fa_model=acp)
+    app.run()
 
     for jupyter notebooks
     https://stackoverflow.com/questions/74070505/how-to-run-fastapi-application-inside-jupyter
@@ -99,7 +114,6 @@ class PCAshiny:
                 col = fa_model.quanti_sup_labels_[i]
                 col_labels.append(col)
 
-        
         DimDescChoice = {}
         for i in range(min(3,fa_model.n_components_)):
             DimDescChoice.update({"Dim."+str(i+1) : "Dimension "+str(i+1)})
@@ -365,7 +379,11 @@ class PCAshiny:
                         ui.panel_conditional("input.ResumeChoice === 'Hist'",
                             ui.row(
                                 ui.column(2,
-                                    ui.input_select(id="VarLabel",label="Choisir une variable",choices={x:x for x in fa_model.active_data_.columns.values},selected=fa_model.active_data_.columns.values[0]),
+                                    ui.input_select(
+                                        id="VarLabel",
+                                        label="Choisir une variable",
+                                        choices={x:x for x in col_labels},
+                                        selected=col_labels[0]),
                                     ui.input_switch(id="AddDensity",label="Densite",value=False)
 
                                 ),
@@ -1274,7 +1292,14 @@ class PCAshiny:
             @output
             @render.data_frame
             def StatsDescTable():
-                StatsDesc = fa_model.active_data_.describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
+                data = fa_model.active_data_
+                if fa_model.quanti_sup_labels_ is not None:
+                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+                    data = pd.concat([data,quanti_sup],axis=1)
+                    if fa_model.row_sup_labels_ is not None:
+                        data = data.drop(index=fa_model.row_sup_labels_)
+
+                StatsDesc = data.describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
                 return  DataTable(data = match_datalength(StatsDesc,input.StatsDescLen()),
                                 filters=input.StatsDescFilter())
 
@@ -1282,7 +1307,14 @@ class PCAshiny:
             @output
             @render.plot(alt="")
             def VarHistGraph():
-                p = pn.ggplot(fa_model.active_data_,pn.aes(x=input.VarLabel()))
+                data = fa_model.active_data_
+                if fa_model.quanti_sup_labels_ is not None:
+                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+                    data = pd.concat([data,quanti_sup],axis=1)
+                    if fa_model.row_sup_labels_ is not None:
+                        data = data.drop(index=fa_model.row_sup_labels_)
+
+                p = pn.ggplot(data,pn.aes(x=input.VarLabel()))
                 # Add density
                 if input.AddDensity():
                     p = (p + pn.geom_histogram(pn.aes(y="..density.."), color="darkblue", fill="lightblue")+
@@ -1298,7 +1330,13 @@ class PCAshiny:
             @output
             @render.data_frame
             def CorrMatrixTable():
-                corr_mat = fa_model.active_data_.corr(method="pearson").round(4).reset_index().rename(columns={"index":"Variables"})
+                data = fa_model.active_data_
+                if fa_model.quanti_sup_labels_ is not None:
+                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+                    data = pd.concat([data,quanti_sup],axis=1)
+                    if fa_model.row_sup_labels_ is not None:
+                        data = data.drop(index=fa_model.row_sup_labels_)
+                corr_mat = data.corr(method="pearson").round(4).reset_index().rename(columns={"index":"Variables"})
                 return DataTable(data = match_datalength(corr_mat,input.CorrMatrixLen()),
                                 filters=input.CorrMatrixFilter())
             

@@ -5,6 +5,7 @@ from scientisttools.version import __version__
 from .pca import PCAshiny
 from .ca import CAshiny
 from .mca import MCAshiny
+from .famd import FAMDshiny
 
 __name__ = "scientistshiny"
 __author__ = 'Duverier DJIFACK ZEBAZE'

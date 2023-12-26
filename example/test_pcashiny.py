@@ -1,11 +1,11 @@
 
-
+import os
 import pandas as pd
 from scientisttools.decomposition import PCA
 from scientistshiny import PCAshiny
 
-href = "D:/Bureau/PythonProject/packages/scientistshiny/data/"
-decathlon = pd.read_excel(href+"/decathlon2.xlsx",header=0,sheet_name=0,index_col=0)
+os.chdir("D:/Bureau/PythonProject/packages/scientistshiny/data/")
+decathlon = pd.read_excel("/decathlon2.xlsx",header=0,sheet_name=0,index_col=0)
 
 acp = PCA(normalize=True,
           n_components = None,
@@ -18,7 +18,7 @@ acp = PCA(normalize=True,
 
 
 # Chargement des données
-D = pd.read_excel(href+"Data_Methodes_Factorielles.xlsx",index_col=0,sheet_name="DATA_ACP_ACTIF")
+D = pd.read_excel("Data_Methodes_Factorielles.xlsx",index_col=0,sheet_name="DATA_ACP_ACTIF")
 # ACP normée
 acp2 = PCA(normalize=True,
           n_components = None,

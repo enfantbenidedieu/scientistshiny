@@ -5,7 +5,6 @@ import pandas as pd
 from scientisttools import CA
 from scientistshiny import CAshiny
 
-
 # Chargement des données
 url = "http://factominer.free.fr/factomethods/datasets/women_work.txt"
 women_work = pd.read_table(url,header=0)

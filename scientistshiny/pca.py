@@ -76,7 +76,7 @@ class PCAshiny(BaseEstimator,TransformerMixin):
     https://stackoverflow.com/questions/74070505/how-to-run-fastapi-application-inside-jupyter
     """
     def __init__(self,model=None):
-        # Check if factor model is Principal Components Analysis (PCA)
+        # Check if model is Principal Components Analysis (PCA)
         if model.model_ != "pca":
             raise TypeError("'model' must be an object of class PCA")
         

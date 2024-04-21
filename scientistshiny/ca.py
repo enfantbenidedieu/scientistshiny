@@ -10,19 +10,9 @@ import nest_asyncio
 import uvicorn
 
 #  All scientisttools fonctions
-from scientisttools import (
-    fviz_ca_row,
-    fviz_ca_col,
-    fviz_eig, 
-    fviz_contrib,
-    fviz_cos2,
-    fviz_corrplot)
-from scientisttools import (
-    get_eig,
-    get_ca_row,
-    get_ca_col,
-    dimdesc)
-from scientistshiny.function import *
+from sklearn.base import BaseEstimator, TransformerMixin
+from scientisttools import fviz_ca_row,fviz_ca_col,fviz_eig, fviz_contrib,fviz_cos2,fviz_corrplot,dimdesc
+from .function import *
 
 colors = mcolors.CSS4_COLORS
 colors["cos2"] = "cos2"
@@ -30,22 +20,25 @@ colors["contrib"] = "contrib"
 
 css_path = Path(__file__).parent / "www" / "style.css"
 
-class CAshiny:
+class CAshiny(BaseEstimator,TransformerMixin):
     """
     Correspondance Analysis (CA) with scientistshiny
+    ------------------------------------------------
 
     Description
     -----------
+    This class inherits from sklearn BaseEstimator and TransformerMixin class
+
     Performs Correspondance Analysis (PCA) including supplementary row and/or column points on a Shiny application.
     Graphics can be downloaded in png, jpg and pdf.
 
     Usage
     -----
-    CAshiny(fa_model)
+    CAshiny(model)
 
     Parameters:
     ----------
-    fa_model : An instance of class CA. A CA result from scientisttools.
+    model : An object of class CA. A CA result from scientisttools.
 
     Returns:
     -------
@@ -61,37 +54,48 @@ class CAshiny:
 
     The left part of the application allows to change some elements of the graphs (axes, variables, colors,.)
 
-    Author:
-    -------
-    Duvérier DJIFACK ZEBAZE : duverierdjifack@gmail.com
+    Author(s)
+    ---------
+    Duvérier DJIFACK ZEBAZE duverierdjifack@gmail.com
 
     Examples:
     ---------
-    > from scientisttools.decomposition import PCA
+    > from scientisttools import CA
     > from scientistshiny import CAshiny
 
 
     for jupyter notebooks
     https://stackoverflow.com/questions/74070505/how-to-run-fastapi-application-inside-jupyter
     """
-
-
-    def __init__(self,fa_model=None):
-        if fa_model.model_ != "ca":
-            raise ValueError("Error : 'fa_model' must be an instance of class CA")
+    def __init__(self,model=None):
+        # Check if model is Correspondence Analysis (CA)
+        if model.model_ != "ca":
+            raise TypeError("'model' must be an instance of class CA")
         
         # -----------------------------------------------------------------------------------
         # Initialise value choice
         value_choice = {"EigenRes": "Valeurs propres",
                         "ColRes"  : "Résultats pour les colonnes",
                         "RowRes"  : "Résultats pour les lignes"}
-        if fa_model.row_sup_labels_ is not None:
+        # Check if supplementary rows
+        if hasattr(model,"row_sup_"):
             value_choice.update({"RowSupRes" : "Résultats pour les lignes supplémentaires"})
-        if fa_model.col_sup_labels_ is not None:
+        
+        # Check if supplementary columns
+        if hasattr(model,"col_sup_"):
             value_choice.update({"ColSupRes" : "Résultats pour les colonnes supplémentaires"})
+        
+        # Check if supplementary quantitatives columns
+        if hasattr(model,"quanti_sup_"):
+            value_choice.update({"QuantiSupRes" : "Résultats pour les variables quantitatives supplémentaires"})
 
+        # Check if supplementary qualitatives columns
+        if hasattr(model,"quali_sup_"):
+            value_choice.update({"QualiSupRes" : "Résultats pour les variables qualitatives supplémentaires"})
+
+        # Dimension to return
         DimDescChoice = {}
-        for i in range(min(3,fa_model.n_components_)):
+        for i in range(min(3,model.call_["n_components"])):
             DimDescChoice.update({"Dim."+str(i+1) : "Dimension "+str(i+1)})
 
         # App UI
@@ -108,7 +112,7 @@ class CAshiny:
                         ui.input_select(
                             id="Axis1",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=0,
                             multiple=False
                         ),
@@ -118,7 +122,7 @@ class CAshiny:
                         ui.input_select(
                             id="Axis2",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=1,
                             multiple=False
                         ),
@@ -278,7 +282,7 @@ class CAshiny:
                     width="25%"
                 ),
                 ui.navset_card_tab(
-                    ui.nav("Graphes",
+                    ui.nav_panel("Graphes",
                         ui.row(
                             ui.column(6,
                                 ui.div(ui.output_plot("RowFactorMap",width='100%',height="600px",fill=True),align="center"),
@@ -300,7 +304,7 @@ class CAshiny:
                             )
                         )
                     ),
-                    ui.nav("Valeurs",
+                    ui.nav_panel("Valeurs",
                         ui.input_radio_buttons(id="choice",label=ui.h6("Quelles sorties voulez-vous?"),choices=value_choice,inline=True),
                         ui.panel_conditional("input.choice ==='EigenRes'",
                             ui.br(),
@@ -319,16 +323,16 @@ class CAshiny:
                         ui.output_ui("RowSupPanel"),
                         ui.output_ui("ColSupPanel")
                     ),
-                    ui.nav("Description automatique des axes",
+                    ui.nav_panel("Description automatique des axes",
                         ui.input_radio_buttons(id="Dimdesc",
                                                label="Choisir les dimensions",
                                                choices=DimDescChoice,selected="Dim.1",inline=True),
                         ui.output_ui(id="DimDesc")
                     ),
-                    ui.nav("Résumé du jeu de données",
+                    ui.nav_panel("Résumé du jeu de données",
                         PanelConditional1(text="ResumeData",name="")
                     ),
-                    ui.nav("Données",
+                    ui.nav_panel("Données",
                         PanelConditional1(text="OverallData",name="")
                         
                     )
@@ -343,7 +347,7 @@ class CAshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis1())
-                Dim = [i for i in range(fa_model.n_components_) if i > x]
+                Dim = [i for i in range(model.call_["n_components"]) if i > x]
                 ui.update_select(
                     id="Axis2",
                     label="",
@@ -354,7 +358,7 @@ class CAshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis2())
-                Dim = [i for i in range(fa_model.n_components_) if i < x]
+                Dim = [i for i in range(model.call_["n_components"]) if i < x]
                 ui.update_select(
                     id="Axis1",
                     label="",
@@ -366,7 +370,7 @@ class CAshiny:
             @output
             @render.ui
             def RowTextChoice():
-                if fa_model.row_sup_labels_ is not None:
+                if model.row_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="RowTextActifColor",
@@ -400,7 +404,7 @@ class CAshiny:
             @output
             @render.ui
             def ColTextChoice():
-                if fa_model.col_sup_labels_ is not None:
+                if model.col_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="ColTextActifColor",
@@ -461,56 +465,52 @@ class CAshiny:
             @reactive.Calc
             def RowFactorPlot():
                 if input.RowTextColor() == "actif/sup":
-                    if fa_model.row_sup_labels_ is None:
-                        fig = fviz_ca_row(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.RowTextActifColor(),
-                            color_sup = None,
-                            text_size = input.RowTextSize(),
-                            lim_contrib =input.RowLimContrib(),
-                            lim_cos2 = input.RowLimCos2(),
-                            title = input.RowTitle(),
-                            repel=input.RowPlotRepel()
-                        )
+                    if model.row_sup is None:
+                        fig = fviz_ca_row(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        color=input.RowTextActifColor(),
+                                        color_sup = None,
+                                        text_size = input.RowTextSize(),
+                                        lim_contrib =input.RowLimContrib(),
+                                        lim_cos2 = input.RowLimCos2(),
+                                        title = input.RowTitle(),
+                                        repel=input.RowPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_ca_row(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.RowTextActifColor(),
-                            color_sup = input.RowTextSupColor(),
-                            text_size = input.RowTextSize(),
-                            lim_contrib =input.RowLimContrib(),
-                            lim_cos2 = input.RowLimCos2(),
-                            title = input.RowTitle(),
-                            repel=input.RowPlotRepel()
-                        )
+                        fig = fviz_ca_row(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        color=input.RowTextActifColor(),
+                                        color_sup = input.RowTextSupColor(),
+                                        text_size = input.RowTextSize(),
+                                        lim_contrib =input.RowLimContrib(),
+                                        lim_cos2 = input.RowLimCos2(),
+                                        title = input.RowTitle(),
+                                        repel=input.RowPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     return fig
                 elif input.RowTextColor() in ["cos2","contrib"]:
-                    if fa_model.row_sup_labels_ is None:
-                        fig = fviz_ca_row(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.RowTextColor(),
-                            color_sup = None,
-                            text_size = input.RowTextSize(),
-                            lim_contrib =input.RowLimContrib(),
-                            lim_cos2 = input.RowLimCos2(),
-                            title = input.RowTitle(),
-                            repel=True
-                        )
+                    if model.row_sup is None:
+                        fig = fviz_ca_row(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        color=input.RowTextColor(),
+                                        color_sup = None,
+                                        text_size = input.RowTextSize(),
+                                        lim_contrib =input.RowLimContrib(),
+                                        lim_cos2 = input.RowLimCos2(),
+                                        title = input.RowTitle(),
+                                        repel=input.RowPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_ca_row(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.RowTextColor(),
-                            color_sup = input.RowTextSupColor(),
-                            text_size = input.RowTextSize(),
-                            lim_contrib =input.RowLimContrib(),
-                            lim_cos2 = input.RowLimCos2(),
-                            title = input.RowTitle(),
-                            repel=input.RowPlotRepel()
-                        )
+                        fig = fviz_ca_row(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        color=input.RowTextColor(),
+                                        color_sup = input.RowTextSupColor(),
+                                        text_size = input.RowTextSize(),
+                                        lim_contrib =input.RowLimContrib(),
+                                        lim_cos2 = input.RowLimCos2(),
+                                        title = input.RowTitle(),
+                                        repel=input.RowPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     return fig
 
             # ------------------------------------------------------------------------------
@@ -530,57 +530,53 @@ class CAshiny:
             @reactive.Calc
             def ColFactorPlot():
                 if input.ColTextColor() == "actif/sup":
-                    if fa_model.col_sup_labels_ is None:
-                        fig = fviz_ca_col(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.ColTitle(),
-                        color=input.ColTextActifColor(),
-                        color_sup=None,
-                        text_size=input.ColTextSize(),
-                        lim_contrib = input.ColLimContrib(),
-                        lim_cos2 = input.ColLimCos2(),
-                        repel=input.ColPlotRepel()
-                        )
+                    if model.col_sup is None:
+                        fig = fviz_ca_col(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.ColTitle(),
+                                        color=input.ColTextActifColor(),
+                                        color_sup=None,
+                                        text_size=input.ColTextSize(),
+                                        lim_contrib = input.ColLimContrib(),
+                                        lim_cos2 = input.ColLimCos2(),
+                                        repel=input.ColPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_ca_col(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.ColTitle(),
-                        color=input.ColTextActifColor(),
-                        color_sup=input.ColTextSupColor(),
-                        text_size=input.ColTextSize(),
-                        lim_contrib = input.ColLimContrib(),
-                        lim_cos2 = input.ColLimCos2(),
-                        repel=input.ColPlotRepel()
-                        )
+                        fig = fviz_ca_col(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.ColTitle(),
+                                        color=input.ColTextActifColor(),
+                                        color_sup=input.ColTextSupColor(),
+                                        text_size=input.ColTextSize(),
+                                        lim_contrib = input.ColLimContrib(),
+                                        lim_cos2 = input.ColLimCos2(),
+                                        repel=input.ColPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     
                     return fig
                 elif input.ColTextColor() in ["cos2","contrib"]:
-                    if fa_model.col_sup_labels_ is None:
-                        fig = fviz_ca_col(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ColTitle(),
-                            color=input.ColTextColor(),
-                            color_sup=None,
-                            text_size=input.ColTextSize(),
-                            lim_contrib = input.ColLimContrib(),
-                            lim_cos2 = input.ColLimCos2(),
-                            repel=input.ColPlotRepel()
-                            )
+                    if model.col_sup is None:
+                        fig = fviz_ca_col(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.ColTitle(),
+                                        color=input.ColTextColor(),
+                                        color_sup=None,
+                                        text_size=input.ColTextSize(),
+                                        lim_contrib = input.ColLimContrib(),
+                                        lim_cos2 = input.ColLimCos2(),
+                                        repel=input.ColPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_ca_col(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ColTitle(),
-                            color=input.ColTextColor(),
-                            color_sup=input.ColTextSupColor(),
-                            text_size=input.ColTextSize(),
-                            lim_contrib = input.ColLimContrib(),
-                            lim_cos2 = input.ColLimCos2(),
-                            repel=input.ColPlotRepel()
-                        )
+                        fig = fviz_ca_col(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.ColTitle(),
+                                        color=input.ColTextColor(),
+                                        color_sup=input.ColTextSupColor(),
+                                        text_size=input.ColTextSize(),
+                                        lim_contrib = input.ColLimContrib(),
+                                        lim_cos2 = input.ColLimCos2(),
+                                        repel=input.ColPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                     return fig
 
             # Variables Factor Map - PCA
@@ -596,19 +592,19 @@ class CAshiny:
             @output
             @render.plot(alt="Scree Plot - PCA")
             def EigenPlot():
-                EigenFig = fviz_eig(self=fa_model,
+                EigenFig = fviz_eig(self=model,
                                     choice=input.EigenChoice(),
-                                    add_labels=input.EigenLabel())
+                                    add_labels=input.EigenLabel(),
+                                    ggtheme=pn.theme_gray())
                 return EigenFig.draw()
             
             # Eigen value - DataFrame
             @output
             @render.data_frame
             def EigenTable():
-                EigenData = get_eig(fa_model).round(4).reset_index().rename(columns={"index":"dimensions"})
+                EigenData = model.eig_.round(4).reset_index().rename(columns={"index":"dimensions"})
                 EigenData.columns = [x.capitalize() for x in EigenData.columns]
-                return DataTable(data=match_datalength(EigenData,input.EigenLen()),
-                                 filters=input.EigenFilter())
+                return DataTable(data=match_datalength(EigenData,input.EigenLen()),filters=input.EigenFilter())
             
             #############################################################################################
             #       Columns informations
@@ -618,7 +614,7 @@ class CAshiny:
             @output
             @render.data_frame
             def ColCoordTable():
-                ColCoord = get_ca_col(fa_model)["coord"].round(4).reset_index().rename(columns={"index" : "Columns"})
+                ColCoord = model.col_["coord"].round(4).reset_index().rename(columns={"index" : "Columns"})
                 return DataTable(data=match_datalength(data=ColCoord,value=input.ColCoordLen()),
                                 filters=input.ColCoordFilter())
             
@@ -627,7 +623,7 @@ class CAshiny:
             @output
             @render.data_frame
             def ColContribTable():
-                ColContrib = get_ca_col(fa_model)["contrib"].round(4).reset_index().rename(columns={"index" : "Columns"})
+                ColContrib = model.col_["contrib"].round(4).reset_index().rename(columns={"index" : "Columns"})
                 return  DataTable(data=match_datalength(data=ColContrib,value=input.ColContribLen()),
                                   filters=input.ColContribFilter())
             
@@ -640,14 +636,13 @@ class CAshiny:
             # Reactive Columns Contributions Map
             @reactive.Calc
             def ColContribMap():
-                fig = fviz_contrib(
-                    self=fa_model,
-                    choice="var",
-                    axis=input.ColContribAxis(),
-                    top_contrib=int(input.ColContribTop()),
-                    color=input.ColContribColor(),
-                    bar_width=input.ColContribBarWidth()
-                    )
+                fig = fviz_contrib(self=model,
+                                    choice="col",
+                                    axis=input.ColContribAxis(),
+                                    top_contrib=int(input.ColContribTop()),
+                                    color=input.ColContribColor(),
+                                    bar_width=input.ColContribBarWidth(),
+                                    ggtheme=pn.theme_gray())
                 return fig
             
             # Plot columns Contributions
@@ -667,15 +662,15 @@ class CAshiny:
             # Reactive columns contribution/correlations Map
             @reactive.Calc
             def ColContribCorrMap():
-                fig = fviz_corrplot(
-                    X=get_ca_col(fa_model)["contrib"],
-                    title=input.ColContribCorrTitle(),
-                    outline_color=input.ColContribCorrColor(),
-                    xlabel="Columns",
-                    colors=[input.ColContribCorrLowColor(),
-                            input.ColContribCorrMidColor(),
-                            input.ColContribCorrHightColor()
-                            ])+pn.theme_gray()
+                fig = fviz_corrplot(X=model.col_["contrib"],
+                                    title=input.ColContribCorrTitle(),
+                                    outline_color=input.ColContribCorrColor(),
+                                    x_label="Columns",
+                                    colors=[input.ColContribCorrLowColor(),
+                                            input.ColContribCorrMidColor(),
+                                            input.ColContribCorrHightColor()
+                                            ],
+                                    ggtheme=pn.theme_gray())
                 return fig
 
             # Plot Columns Contributions
@@ -691,9 +686,8 @@ class CAshiny:
             @output
             @render.data_frame
             def ColCos2Table():
-                ColCos2 = get_ca_col(fa_model)["cos2"].round(4).reset_index().rename(columns={"index" : "Columns"})
-                return  DataTable(data=match_datalength(data=ColCos2,value=input.ColCos2Len()),
-                                  filters=input.ColCos2Filter())
+                ColCos2 = model.col_["cos2"].round(4).reset_index().rename(columns={"index" : "Columns"})
+                return  DataTable(data=match_datalength(data=ColCos2,value=input.ColCos2Len()),filters=input.ColCos2Filter())
             
             # Add Columns Cos2 Modal Show
             @reactive.Effect
@@ -704,14 +698,13 @@ class CAshiny:
             # Reactive Graph
             @reactive.Calc
             def ColCos2Map():
-                fig = fviz_cosines(
-                    self=fa_model,
-                    choice="var",
-                    axis=input.ColCos2Axis(),
-                    top_cos2=int(input.ColCos2Top()),
-                    color=input.ColCos2Color(),
-                    bar_width=input.ColCos2BarWidth()
-                )
+                fig = fviz_cos2(self=model,
+                                choice="col",
+                                axis=input.ColCos2Axis(),
+                                top_cos2=int(input.ColCos2Top()),
+                                color=input.ColCos2Color(),
+                                bar_width=input.ColCos2BarWidth(),
+                                ggtheme=pn.theme_gray())
                 return fig
             
             # Plot Columns Cos2
@@ -729,15 +722,15 @@ class CAshiny:
         
             @reactive.Calc
             def ColCos2CorrMap():
-                fig = fviz_corrplot(
-                        X=get_ca_col(fa_model)["cos2"],
-                        title=input.ColCos2CorrTitle(),
-                        outline_color=input.ColCos2CorrColor(),
-                        xlabel="Columns",
-                        colors=[input.ColCos2CorrLowColor(),
-                                input.ColCos2CorrMidColor(),
-                                input.ColCos2CorrHightColor()
-                                ])+pn.theme_gray()
+                fig = fviz_corrplot(X=model.col_["cos2"],
+                                    title=input.ColCos2CorrTitle(),
+                                    outline_color=input.ColCos2CorrColor(),
+                                    x_label="Columns",
+                                    colors=[input.ColCos2CorrLowColor(),
+                                            input.ColCos2CorrMidColor(),
+                                            input.ColCos2CorrHightColor()
+                                            ],
+                                    ggtheme=pn.theme_gray())
                 return fig
 
             # Plot Columns Cos2/Correlations plot
@@ -751,12 +744,8 @@ class CAshiny:
             @output
             @render.data_frame
             def ColSupCoordTable():
-                colsupcoord = pd.DataFrame(get_ca_col(fa_model)["col_sup"]["coord"],
-                                           index=fa_model.col_sup_labels_,
-                                           columns=fa_model.dim_index_)
-                ColSupCoord = colsupcoord.round(4).reset_index().rename(columns={"index" : "Columns"})
-                return DataTable(data=match_datalength(data=ColSupCoord,value=input.ColSupCoordLen()),
-                                 filters=input.ColSupCoordFilter())
+                ColSupCoord = model.col_sup_["coord"].round(4).reset_index().rename(columns={"index" : "Columns"})
+                return DataTable(data=match_datalength(data=ColSupCoord,value=input.ColSupCoordLen()),filters=input.ColSupCoordFilter())
 
             ############################################################################################
             #       Row Points Informations
@@ -767,18 +756,16 @@ class CAshiny:
             @output
             @render.data_frame
             def RowCoordTable():
-                RowCoord = get_ca_row(fa_model)["coord"].round(4).reset_index()
-                return DataTable(data = match_datalength(RowCoord,input.RowCoordLen()),
-                                 filters=input.RowCoordFilter())
+                RowCoord = model.row_["coord"].round(4).reset_index()
+                return DataTable(data = match_datalength(RowCoord,input.RowCoordLen()),filters=input.RowCoordFilter())
             
             #-------------------------------------------------------------------------------------------------
             # Rows Contributions
             @output
             @render.data_frame
             def RowContribTable():
-                RowContrib = get_ca_row(fa_model)["contrib"].round(4).reset_index()
-                return  DataTable(data=match_datalength(RowContrib,input.RowContribLen()),
-                                  filters=input.RowContribFilter())
+                RowContrib = model.row_["contrib"].round(4).reset_index()
+                return  DataTable(data=match_datalength(RowContrib,input.RowContribLen()),filters=input.RowContribFilter())
             
             # Add rows Contributions Modal Show
             @reactive.Effect
@@ -789,13 +776,13 @@ class CAshiny:
             # Plot Rows Contributions
             @reactive.Calc
             def RowContribMap():
-                fig = fviz_contrib(
-                    self=fa_model,
-                    choice="ind",
-                    axis=input.RowContribAxis(),
-                    top_contrib=int(input.RowContribTop()),
-                    color = input.RowContribColor(),
-                    bar_width= input.RowContribBarWidth())
+                fig = fviz_contrib(self=model,
+                                choice="row",
+                                axis=input.RowContribAxis(),
+                                top_contrib=int(input.RowContribTop()),
+                                color = input.RowContribColor(),
+                                bar_width= input.RowContribBarWidth(),
+                                ggtheme=pn.theme_gray())
                 return fig
 
             @output
@@ -812,15 +799,15 @@ class CAshiny:
             # Plot Row Contributions
             @reactive.Calc
             def RowContribCorrMap():
-                fig = fviz_corrplot(
-                    X=get_ca_row(fa_model)["contrib"],
-                    title=input.RowContribCorrTitle(),
-                    xlabel="Rows",
-                    outline_color=input.RowContribCorrColor(),
-                    colors=[input.RowContribCorrLowColor(),
-                            input.RowContribCorrMidColor(),
-                            input.RowContribCorrHightColor()
-                            ])+pn.theme_gray()
+                fig = fviz_corrplot(X=model.row_["contrib"],
+                                    title=input.RowContribCorrTitle(),
+                                    x_label="Rows",
+                                    outline_color=input.RowContribCorrColor(),
+                                    colors=[input.RowContribCorrLowColor(),
+                                            input.RowContribCorrMidColor(),
+                                            input.RowContribCorrHightColor()
+                                            ],
+                                    ggtheme=pn.theme_gray())
                 return fig
 
             @output
@@ -833,9 +820,8 @@ class CAshiny:
             @output
             @render.data_frame
             def RowCos2Table():
-                RowCos2 = get_ca_row(fa_model)["cos2"].round(4).reset_index()
-                return  DataTable(data = match_datalength(RowCos2,input.RowCos2Len()),
-                                filters=input.RowCos2Filter())
+                RowCos2 = model.row_["cos2"].round(4).reset_index()
+                return  DataTable(data = match_datalength(RowCos2,input.RowCos2Len()),filters=input.RowCos2Filter())
             
             # Add Rows Cos2 Modal Show
             @reactive.Effect
@@ -846,13 +832,13 @@ class CAshiny:
             # Plot Rows Cos2
             @reactive.Calc
             def RowCos2Map():
-                fig = fviz_cosines(
-                    self=fa_model,
-                    choice="ind",
-                    axis=input.RowCos2Axis(),
-                    top_cos2=int(input.RowCos2Top()),
-                    color=input.RowCos2Color(),
-                    bar_width=input.RowCos2BarWidth())
+                fig = fviz_cos2(self=model,
+                                choice="row",
+                                axis=input.RowCos2Axis(),
+                                top_cos2=int(input.RowCos2Top()),
+                                color=input.RowCos2Color(),
+                                bar_width=input.RowCos2BarWidth(),
+                                ggtheme=pn.theme_gray())
                 return fig
                 
             @output
@@ -869,15 +855,15 @@ class CAshiny:
             # Plot Rows Contributions
             @reactive.Calc
             def RowCos2CorrMap():
-                fig = fviz_corrplot(
-                    X=get_ca_col(fa_model)["cos2"],
-                    title=input.RowCos2CorrTitle(),
-                    xlabel="Rows",
-                    outline_color=input.RowCos2CorrColor(),
-                    colors=[input.RowCos2CorrLowColor(),
-                            input.RowCos2CorrMidColor(),
-                            input.RowCos2CorrHightColor()
-                        ])+pn.theme_gray()
+                fig = fviz_corrplot(X=model.row_["cos2"],
+                                    title=input.RowCos2CorrTitle(),
+                                    x_label="Rows",
+                                    outline_color=input.RowCos2CorrColor(),
+                                    colors=[input.RowCos2CorrLowColor(),
+                                            input.RowCos2CorrMidColor(),
+                                            input.RowCos2CorrHightColor()
+                                        ],
+                                    ggtheme=pn.theme_gray())
                 return fig
 
             @output
@@ -890,9 +876,8 @@ class CAshiny:
             @output
             @render.data_frame
             def RowSupCoordTable():
-                RowSupCoord = get_ca_row(fa_model)["row_sup"]["coord"].round(4).reset_index()
-                return  DataTable(data = match_datalength(RowSupCoord,input.RowSupCoordLen()),
-                                filters=input.RowSupCoordFilter())
+                RowSupCoord = model.row_sup_["coord"].round(4).reset_index()
+                return  DataTable(data = match_datalength(RowSupCoord,input.RowSupCoordLen()),filters=input.RowSupCoordFilter())
             
             #########################################################################################
             #       Description des axes
@@ -913,26 +898,24 @@ class CAshiny:
             @output
             @render.data_frame
             def RowDescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None)
+                DimDesc = dimdesc(self=model,axis=None)
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescRow = DimDesc[input.Dimdesc()]["row"].reset_index().rename(columns={"index":"Rows"})
                 elif isinstance(DimDesc[input.Dimdesc()],pd.DataFrame):
                     DimDescRow = DimDesc[input.Dimdesc()].reset_index().rename(columns={"index":"Rows"})
                 else:
                     DimDescRow = pd.DataFrame()
-                return  DataTable(data = match_datalength(DimDescRow,input.RowDescLen()),
-                                  filters=input.RowDescFilter())
+                return  DataTable(data = match_datalength(DimDescRow,input.RowDescLen()),filters=input.RowDescFilter())
             
             @output
             @render.data_frame
             def ColDescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None)
+                DimDesc = dimdesc(self=model,axis=None)
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescCol = DimDesc[input.Dimdesc()]["col"].reset_index().rename(columns={"index":"Columns"})
                 else:
                     DimDescCol = pd.DataFrame()
-                return  DataTable(data = match_datalength(DimDescCol,input.ColDescLen()),
-                                  filters=input.ColDescFilter())
+                return  DataTable(data = match_datalength(DimDescCol,input.ColDescLen()),filters=input.ColDescFilter())
             
             ################################################################################################
             #       Résumé du jeu de données
@@ -942,9 +925,8 @@ class CAshiny:
             @output
             @render.data_frame
             def ResumeDataTable():
-                StatsDesc = fa_model.active_data_.describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
-                return  DataTable(data = match_datalength(StatsDesc,input.ResumeDataLen()),
-                                  filters=input.ResumeDataFilter())
+                StatsDesc = model.call_["X"].describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
+                return  DataTable(data = match_datalength(StatsDesc,input.ResumeDataLen()),filters=input.ResumeDataFilter())
             
             #####################################################################################################
             #---------------------------------------------------------------------------------------------------
@@ -952,9 +934,8 @@ class CAshiny:
             @output
             @render.data_frame
             def OverallDataTable():
-                overalldata = fa_model.data_.reset_index()
-                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),
-                                filters=input.OverallDataFilter())
+                overalldata = model.call_["Xtot"].reset_index()
+                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),filters=input.OverallDataFilter())
             
         self.app_ui = app_ui
         self.app_server = server

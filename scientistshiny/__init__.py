@@ -3,7 +3,7 @@ from __future__ import absolute_import
 from scientisttools.version import __version__
 
 from .pca import PCAshiny
-#from .ca import CAshiny
+from .ca import CAshiny
 #from .mca import MCAshiny
 #from .famd import FAMDshiny
 

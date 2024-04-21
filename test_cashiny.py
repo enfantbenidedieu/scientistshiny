@@ -2,7 +2,7 @@
 
 # Chargement des librairies
 import pandas as pd
-from scientisttools.decomposition import CA
+from scientisttools import CA
 from scientistshiny import CAshiny
 
 # Chargement des données

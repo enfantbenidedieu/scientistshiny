@@ -28,6 +28,6 @@ body-title{
     align-items: center;
   }
 
-nav {
-    background-color: blue;
+nav_panel{
+    background-color: gray;
 }

@@ -10,14 +10,14 @@ import nest_asyncio
 import uvicorn
 
 #  All scientisttools fonctions
-from scientisttools.ggplot import (
+from scientisttools import (
     fviz_ca_row,
     fviz_ca_col,
     fviz_eig, 
     fviz_contrib,
-    fviz_cosines,
+    fviz_cos2,
     fviz_corrplot)
-from scientisttools.extractfactor import (
+from scientisttools import (
     get_eig,
     get_ca_row,
     get_ca_col,

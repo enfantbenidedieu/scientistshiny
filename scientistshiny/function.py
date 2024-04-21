@@ -1,73 +1,68 @@
-
-###################################
-
+# -*- coding: utf-8 -*-
 from shiny import render, ui
 import matplotlib.colors as mcolors
 import plotnine as pn
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 
 def fviz_barplot(X,
-                 ncp = 1,
+                 ncp = 2,
                  axis=None,
-                 xlabel=None,
-                 ylabel = None,
+                 y_label = None,
                  top_corr=10,
                  title = None,
                  bar_width=None,
                  add_grid=True,
                  color="steelblue",
-                 ggtheme=pn.theme_gray()) -> plt:   
+                 xtickslab_rotation = 45,
+                 ggtheme=pn.theme_gray()) -> pn: 
+    """
+    
+    
+    
+    """  
         
     if axis is None:
         axis = 0
     elif not isinstance(axis,int):
-        raise ValueError("Error : 'axis' must be an integer.")
+        raise ValueError("'axis' must be an integer.")
     elif axis < 0 or axis > ncp:
-        raise ValueError(f"Error : 'axis' must be an integer between 0 and {ncp- 1}.")
-            
-    if xlabel is None:
-        xlabel = ""
+        raise ValueError(f"'axis' must be an integer between 0 and {ncp- 1}.")
             
     if bar_width is None:
         bar_width = 0.5
     if top_corr is None:
         top_corr = 10
     elif not isinstance(top_corr,int):
-        raise ValueError("Error : 'top_corr' must be an integer.")
+        raise ValueError("'top_corr' must be an integer.")
     
-    corr = X.iloc[:,axis].values
-    labels = X.index
+    #########
+    corr = X.iloc[:,axis].reset_index()
+    corr.columns = ["name","corr"]
+
+    if top_corr is not None:
+        corr = corr.sort_values(by="corr",ascending=False).head(top_corr)
     
-    n = len(labels)
-    n_labels = len(labels)
-        
-    if (top_corr is not None) & (top_corr < n_labels):
-        n_labels = top_corr
-        
-    limit = n - n_labels
-    contrib_sorted = np.sort(corr)[limit:n]
-    labels_sort = pd.Series(labels)[np.argsort(corr)][limit:n]
-
-    df = pd.DataFrame({"labels" : labels_sort, "corr" : contrib_sorted})
-    p = pn.ggplot(df,pn.aes(x = "reorder(labels,corr)", y = "corr"))+pn.geom_bar(stat="identity",fill=color,width=bar_width)
-
-    if title is not None:
-        p = p = p + pn.ggtitle(title)
-    if ylabel is not None:
-        p  = p + pn.xlab(ylabel)
-    if xlabel is not None:
-        p = p + pn.ylab(xlabel)
-
-    # Coord Flip
-    p = p + pn.coord_flip()
+    p = pn.ggplot()
+    
+    p = p + pn.geom_bar(data=corr,mapping=pn.aes(x="reorder(name,-corr)",y="corr",group = 1),
+                        fill=color,color=color,width=bar_width,stat="identity")
+    
+    if y_label is None:
+        y_label = "Cos2 - Quality of representation"
+    p = p + pn.labs(title=title,y=y_label,x="")
 
     if add_grid:
-        p = p + pn.theme(panel_grid_major = pn.element_line(color = "black",size = 0.5,linetype = "dashed"),
-                         axis_text_x = pn.element_text(angle = 90, ha = "center", va = "center"))
+        p = p + pn.theme(panel_grid_major = pn.element_line(color = "black",size = 0.5,linetype = "dashed"))
+    p = p + ggtheme
 
-    return p+ggtheme
+    if xtickslab_rotation > 5:
+        ha = "right"
+    if xtickslab_rotation == 90:
+        ha = "center"
+
+    # Rotation
+    p = p + pn.theme(axis_text_x = pn.element_text(rotation = xtickslab_rotation,ha=ha))
+   
+    return p
 
 
 # Download Btn Background
@@ -136,7 +131,7 @@ def match_datalength(data,value):
         
 # Return DaaFrame as DaaTable
 def DataTable(data,filters=False):
-    return render.DataTable(data,filters=filters,width="100%",row_selection_mode="multiple")
+    return render.DataTable(data,filters=filters,width="100%",selection_mode="rows")
 
 # 
 def GraphModalShow(text=str,name=str):

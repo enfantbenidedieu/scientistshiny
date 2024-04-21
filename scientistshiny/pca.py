@@ -1,28 +1,18 @@
 # -*- coding: utf-8 -*-
 from shiny import App, Inputs, Outputs, Session, render, ui, reactive
 import shinyswatch
-from pathlib import Path
+
 import pandas as pd
 import plotnine as pn
 import matplotlib.colors as mcolors
 import nest_asyncio
 import uvicorn
 
-#  All scientisttools fonctions
-from scientisttools.ggplot import (
-    fviz_pca_ind,
-    fviz_pca_var,
-    fviz_eig, 
-    fviz_contrib,
-    fviz_cosines,
-    fviz_corrplot)
-from scientisttools.extractfactor import (
-    get_eig,
-    get_pca_var,
-    get_pca_ind,
-    dimdesc)
+from pathlib import Path
+from sklearn.base import BaseEstimator, TransformerMixin
+from scientisttools import fviz_pca_ind,fviz_pca_var,fviz_eig, fviz_contrib,fviz_cos2, fviz_corrplot, dimdesc
 
-from scientistshiny.function import *
+from .function import *
 
 colors = mcolors.CSS4_COLORS
 colors["cos2"] = "cos2"
@@ -30,22 +20,25 @@ colors["contrib"] = "contrib"
 
 css_path = Path(__file__).parent / "www" / "style.css"
 
-class PCAshiny:
+class PCAshiny(BaseEstimator,TransformerMixin):
     """
     Principal Component Analysis (PCA) with scientistshiny
+    ------------------------------------------------------
 
     Description
     -----------
+    This class inherits from sklearn BaseEstimator and TransformerMixin class
+
     Performs Principal Component Analysis (PCA) with supplementary individuals, supplementary quantitative variables and supplementary categorical variables on a Shiny application.
     Graphics can be downloaded in png, jpg and pdf.
 
     Usage
     -----
-    PCAshiny(fa_model)
+    PCAshiny(model)
 
-    Parameters:
+    Parameters
     ----------
-    fa_model : An instance of class PCA. A PCA result from scientisttools.
+    model : An object of class PCA. A PCA result from scientisttools.
 
     Returns:
     -------
@@ -61,63 +54,60 @@ class PCAshiny:
 
     The left part of the application allows to change some elements of the graphs (axes, variables, colors,.)
 
-    Author:
-    -------
-    Duvérier DJIFACK ZEBAZE : duverierdjifack@gmail.com
+    Author(s)
+    --------
+    Duvérier DJIFACK ZEBAZE duverierdjifack@gmail.com
 
     Examples:
     ---------
     import pandas as pd
-    from scientisttools.decomposition import PCA
+    from scientisttools import PCA
     from scientistshiny import PCAshiny
 
     href = "D:/Bureau/PythonProject/packages/scientistshiny/data/"
-    decathlon = pd.read_excel(href+"/decathlon2.xlsx",header=0,sheet_name=0,index_col=0)
+    decathlon = pd.read_excel(href+"decathlon2.xlsx",header=0,sheet_name=0,index_col=0)
 
-    acp = PCA(normalize=True,
-            n_components = None,
-            row_labels=decathlon.index[:23],
-            col_labels=decathlon.columns[:10],
-            row_sup_labels=decathlon.index[23:],
-            quanti_sup_labels=["Rank","Points"],
-            quali_sup_labels=["Competition"],
-            parallelize=True).fit(decathlon)
-    
-    app = PCAshiny(fa_model=acp)
+    res_pca = PCA(standardize=True,ind_sup=list(range(23,27)),quanti_sup=[10,11],quali_sup=12,parallelize=True)
+    res_pca.fit(decathlon)
+    app = PCAshiny(model=res_pca)
     app.run()
 
     for jupyter notebooks
     https://stackoverflow.com/questions/74070505/how-to-run-fastapi-application-inside-jupyter
     """
-
-
-    def __init__(self,fa_model=None):
-        if fa_model.model_ != "pca":
-            raise ValueError("Error : 'fa_model' must be an instance of class PCA")
+    def __init__(self,model=None):
+        # Check if factor model is Principal Components Analysis (PCA)
+        if model.model_ != "pca":
+            raise TypeError("'model' must be an object of class PCA")
         
         # -----------------------------------------------------------------------------------
         # Initialise value choice
         value_choice = {"EigenRes":"Valeurs propres",
                         "VarRes":"Résultats des variables",
                         "IndRes":"Résultats sur les individus"}
-        if fa_model.row_sup_labels_ is not None:
+        # Check if supplementary individuals
+        if hasattr(model, "ind_sup_"):
             value_choice.update({"IndSupRes" : "Résultats des individus supplémentaires"})
-        if fa_model.quanti_sup_labels_ is not None:
+        
+        # Check if supplementary quantitatives variables
+        if hasattr(model, "quanti_sup_"):
             value_choice.update({"VarSupRes" : "Résultats sur les variables supplémentaires"})
-        if fa_model.quali_sup_labels_ is not None:
+        
+        # Check if supplementary qualitatives variables
+        if hasattr(model, "quali_sup_"):
             value_choice.update({"VarQualRes" : "Résultats des variables qualitatives"})
         
         # Quantitatives columns
-        col_labels = list(fa_model.col_labels_)
-        if fa_model.quanti_sup_labels_ is not None:
-            for i in range(len(fa_model.quanti_sup_labels_)):
-                col = fa_model.quanti_sup_labels_[i]
-                col_labels.append(col)
+        var_labels = model.call_["X"].columns.tolist()
+        if hasattr(model, "quanti_sup_"):
+            var_labels = [*var_labels,*model.quanti_sup_["coord"].index.tolist()]
 
+        # Dimension criteria
         DimDescChoice = {}
-        for i in range(min(3,fa_model.n_components_)):
+        for i in range(min(3,model.call_["n_components"])):
             DimDescChoice.update({"Dim."+str(i+1) : "Dimension "+str(i+1)})
 
+        ################################################# Start App
         app_ui = ui.page_fluid(
             ui.include_css(css_path),
             shinyswatch.theme.superhero(),
@@ -131,7 +121,7 @@ class PCAshiny:
                         ui.input_select(
                             id="Axis1",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=0,
                             multiple=False
                         ),
@@ -141,7 +131,7 @@ class PCAshiny:
                         ui.input_select(
                             id="Axis2",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=1,
                             multiple=False
                         ),
@@ -221,8 +211,8 @@ class PCAshiny:
                             ui.input_select(
                                 id="IndTextVarQuant",
                                 label="choix de la variable",
-                                choices={x:x for x in col_labels},
-                                selected=col_labels[0],
+                                choices={x:x for x in var_labels},
+                                selected=var_labels[0],
                                 width="100%"
                             )
                         ),
@@ -312,7 +302,7 @@ class PCAshiny:
                     width="25%"
                 ),
                 ui.navset_card_tab(
-                    ui.nav("Graphes",
+                    ui.nav_panel("Graphes",
                         ui.row(
                             ui.column(7,
                                 ui.div(ui.output_plot("RowFactorMap",width='100%', height='500px'),align="center"),
@@ -334,7 +324,7 @@ class PCAshiny:
                             )
                         )
                     ),
-                    ui.nav("Valeurs",
+                    ui.nav_panel("Valeurs",
                         ui.input_radio_buttons(id="choice",label=ui.h6("Quelles sorties voulez-vous?"),choices=value_choice,inline=True),
                         ui.panel_conditional("input.choice ==='EigenRes'",
                             ui.br(),
@@ -354,14 +344,14 @@ class PCAshiny:
                         ui.output_ui("VarSupPanel"),  
                         ui.output_ui("VarQualPanel")
                     ),
-                    ui.nav("Description automatique des axes",
+                    ui.nav_panel("Description automatique des axes",
                         ui.row(
                             ui.column(7,ui.input_radio_buttons(id="pvalueDimdesc",label="Probabilité critique",choices={x:y for x,y in zip([0.01,0.05,0.1,1.0],["Significance level 1%","Significance level 5%","Significance level 10%","None"])},selected=0.05,width="100%",inline=True)),
                             ui.column(5,ui.input_radio_buttons(id="Dimdesc",label="Choisir les dimensions",choices=DimDescChoice,selected="Dim.1",inline=True))
                         ),
                         ui.output_ui(id="DimDesc")
                     ),
-                    ui.nav("Résumé du jeu de données",
+                    ui.nav_panel("Résumé du jeu de données",
                         ui.input_radio_buttons(
                             id="ResumeChoice",
                             label="Que voulez - vous afficher?",
@@ -382,8 +372,8 @@ class PCAshiny:
                                     ui.input_select(
                                         id="VarLabel",
                                         label="Choisir une variable",
-                                        choices={x:x for x in col_labels},
-                                        selected=col_labels[0]),
+                                        choices={x:x for x in var_labels},
+                                        selected=var_labels[0]),
                                     ui.input_switch(id="AddDensity",label="Densite",value=False)
 
                                 ),
@@ -394,7 +384,7 @@ class PCAshiny:
                             PanelConditional1(text="CorrMatrix",name="")
                         )
                     ),
-                    ui.nav("Données",
+                    ui.nav_panel("Données",
                         PanelConditional1(text="OverallData",name="")
                         
                     )
@@ -409,7 +399,7 @@ class PCAshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis1())
-                Dim = [i for i in range(fa_model.n_components_) if i > x]
+                Dim = [i for i in range(model.call_["n_components"]) if i > x]
                 ui.update_select(
                     id="Axis2",
                     label="",
@@ -420,7 +410,7 @@ class PCAshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis2())
-                Dim = [i for i in range(fa_model.n_components_) if i < x]
+                Dim = [i for i in range(model.call_["n_components"]) if i < x]
                 ui.update_select(
                     id="Axis1",
                     label="",
@@ -432,7 +422,7 @@ class PCAshiny:
             @output
             @render.ui
             def IndTextChoice():
-                if fa_model.row_sup_labels_ is not None and fa_model.quali_sup_labels_ is not None:
+                if model.ind_sup is not None and model.quali_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="IndTextActifColor",
@@ -459,7 +449,7 @@ class PCAshiny:
                             width="100%"
                         ),
                     ),
-                elif fa_model.row_sup_labels_ is not None:
+                elif model.ind_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="IndTextActifColor",
@@ -478,7 +468,7 @@ class PCAshiny:
                             width="100%"
                         )
                     )
-                elif fa_model.quali_sup_labels_ is not None:
+                elif model.quali_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="IndTextActifColor",
@@ -513,13 +503,15 @@ class PCAshiny:
             @output
             @render.ui
             def IndTextVarQual():
-                if fa_model.quali_sup_labels_ is not None:
+                if model.quali_sup is not None:
+                    # Extract supplementary qualitatives variables
+                    quali_sup_labels = model.quali_sup_["eta2"].index.tolist()
                     return ui.TagList(
                         ui.input_select(
                             id="IndTextVarQualColor",
                             label="Choix de la variable",
-                            choices={x:x for x in fa_model.quali_sup_labels_},
-                            selected=fa_model.quali_sup_labels_[0],
+                            choices={x:x for x in quali_sup_labels},
+                            selected=quali_sup_labels[0],
                             multiple=False,
                             width="100%"
                         ),
@@ -538,7 +530,7 @@ class PCAshiny:
             @output
             @render.ui
             def VarTextChoice():
-                if fa_model.quanti_sup_labels_ is not None:
+                if model.quanti_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="VarTextActifColor",
@@ -618,9 +610,9 @@ class PCAshiny:
             @reactive.Calc
             def RowPlot():
                 if input.IndTextColor() == "actif/sup":
-                    if (fa_model.row_sup_labels_ is not None) and (fa_model.quali_sup_labels_ is not None):
+                    if (model.ind_sup is not None) and (model.quali_sup is not None):
                         fig = fviz_pca_ind(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             color=input.IndTextActifColor(),
                             color_sup = input.IndTextSupColor(),
@@ -631,9 +623,9 @@ class PCAshiny:
                             title = input.IndTitle(),
                             repel=input.IndPlotRepel()
                         )
-                    elif fa_model.row_sup_labels_ is not None:
+                    elif model.ind_sup is not None:
                         fig = fviz_pca_ind(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             color=input.IndTextActifColor(),
                             color_sup = input.IndTextSupColor(),
@@ -644,9 +636,9 @@ class PCAshiny:
                             title = input.IndTitle(),
                             repel=input.IndPlotRepel()
                         )
-                    elif fa_model.quali_sup_labels_ is not None:
+                    elif model.quali_sup is not None:
                         fig = fviz_pca_ind(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             color=input.IndTextActifColor(),
                             color_sup = None,
@@ -659,7 +651,7 @@ class PCAshiny:
                         )
                     else:
                         fig = fviz_pca_ind(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             color=input.IndTextActifColor(),
                             color_sup = None,
@@ -672,7 +664,7 @@ class PCAshiny:
                         )
                 elif input.IndTextColor() in ["cos2","contrib"]:
                     fig = fviz_pca_ind(
-                        self=fa_model,
+                        self=model,
                         axis=[int(input.Axis1()),int(input.Axis2())],
                         color=input.IndTextColor(),
                         text_size = input.IndTextSize(),
@@ -683,7 +675,7 @@ class PCAshiny:
                     )
                 elif input.IndTextColor() == "varquant":
                     fig = fviz_pca_ind(
-                        self=fa_model,
+                        self=model,
                         axis=[int(input.Axis1()),int(input.Axis2())],
                         color=input.IndTextVarQuant(),
                         text_size = input.IndTextSize(),
@@ -694,21 +686,20 @@ class PCAshiny:
                         repel=input.IndPlotRepel()
                     )
                 elif input.IndTextColor() == "varqual":
-                    if fa_model.quali_sup_labels_ is not None:
+                    if model.quali_sup is not None:
                         fig = fviz_pca_ind(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             text_size = input.IndTextSize(),
                             lim_contrib =input.IndLimContrib(),
                             lim_cos2 = input.IndLimCos2(),
                             title = input.IndTitle(),
                             habillage= input.IndTextVarQualColor(),
-                            add_ellipse=input.AddEllipse(),
                             repel=input.IndPlotRepel()
                         )
                     else:
                         fig = pn.ggplot()
-                return fig
+                return fig+pn.theme_gray()
 
             # ------------------------------------------------------------------------------
             # Individual Factor Map - PCA
@@ -729,9 +720,9 @@ class PCAshiny:
             @reactive.Calc
             def VarFactorPlot():
                 if input.VarTextColor() == "actif/sup":
-                    if fa_model.quanti_sup_labels_ is not None:
+                    if model.quanti_sup is not None:
                         fig = fviz_pca_var(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             title=input.VarTitle(),
                             color=input.VarTextActifColor(),
@@ -742,7 +733,7 @@ class PCAshiny:
                             )
                     else:
                         fig = fviz_pca_var(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             title=input.VarTitle(),
                             color=input.VarTextActifColor(),
@@ -752,9 +743,9 @@ class PCAshiny:
                             lim_cos2 = input.VarLimCos2() 
                             )
                 elif input.VarTextColor() in ["cos2","contrib"]:
-                    if fa_model.quanti_sup_labels_ is not None:
+                    if model.quanti_sup is not None:
                         fig = fviz_pca_var(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             title=input.VarTitle(),
                             color=input.VarTextColor(),
@@ -765,7 +756,7 @@ class PCAshiny:
                             )
                     else:
                         fig = fviz_pca_var(
-                            self=fa_model,
+                            self=model,
                             axis=[int(input.Axis1()),int(input.Axis2())],
                             title=input.VarTitle(),
                             color=input.VarTextColor(),
@@ -774,7 +765,7 @@ class PCAshiny:
                             lim_contrib = input.VarLimContrib(),
                             lim_cos2 = input.VarLimCos2() 
                             )
-                return fig
+                return fig+pn.theme_gray()
 
             # Variables Factor Map - PCA
             @output
@@ -787,19 +778,18 @@ class PCAshiny:
             @output
             @render.plot(alt="Scree Plot - PCA")
             def EigenPlot():
-                EigenFig = fviz_eig(self=fa_model,
+                EigenFig = fviz_eig(self=model,
                                     choice=input.EigenChoice(),
-                                    add_labels=input.EigenLabel())
+                                    add_labels=input.EigenLabel())+pn.theme_gray()
                 return EigenFig.draw()
             
             # Eigen value - DataFrame
             @output
             @render.data_frame
             def EigenTable():
-                EigenData = get_eig(fa_model).round(4).reset_index().rename(columns={"index":"dimensions"})
+                EigenData = model.eig_.round(4).reset_index().rename(columns={"index":"dimensions"})
                 EigenData.columns = [x.capitalize() for x in EigenData.columns]
-                return DataTable(data=match_datalength(EigenData,input.EigenLen()),
-                                filters=input.EigenFilter())
+                return DataTable(data=match_datalength(EigenData,input.EigenLen()),filters=input.EigenFilter())
             
             ##################################################################################################
             #   Continuous Variables
@@ -809,18 +799,16 @@ class PCAshiny:
             @output
             @render.data_frame
             def VarCoordTable():
-                VarCoord = get_pca_var(fa_model)["coord"].round(4).reset_index().rename(columns={"index" : "Variables"})
-                return DataTable(data=match_datalength(data=VarCoord,value=input.VarCoordLen()),
-                                filters=input.VarCoordFilter())
+                VarCoord = model.var_["coord"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                return DataTable(data=match_datalength(data=VarCoord,value=input.VarCoordLen()),filters=input.VarCoordFilter())
             
             #----------------------------------------------------------------------------------------------------
             # Variables Contributions
             @output
             @render.data_frame
             def VarContribTable():
-                VarContrib = get_pca_var(fa_model)["contrib"].round(4).reset_index().rename(columns={"index" : "Variables"})
-                return  DataTable(data=match_datalength(data=VarContrib,value=input.VarContribLen()),
-                                filters=input.VarContribFilter())
+                VarContrib = model.var_["contrib"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                return  DataTable(data=match_datalength(data=VarContrib,value=input.VarContribLen()),filters=input.VarContribFilter())
             
             #-----------------------------------------------------------------------------------------------------
             # Add Variables Contributions Modal Show
@@ -831,14 +819,14 @@ class PCAshiny:
             
             @reactive.Calc
             def VarContribMap():
-                fig = fviz_contrib(
-                    self=fa_model,
-                    choice="var",
-                    axis=input.VarContribAxis(),
-                    top_contrib=int(input.VarContribTop()),
-                    color=input.VarContribColor(),
-                    bar_width=input.VarContribBarWidth()
-                    )
+                fig = fviz_contrib(self=model,
+                                    choice="var",
+                                    axis=input.VarContribAxis(),
+                                    top_contrib=int(input.VarContribTop()),
+                                    color=input.VarContribColor(),
+                                    bar_width=input.VarContribBarWidth(),
+                                    ggtheme=pn.theme_gray()
+                                    )
                 return fig
 
             # Plot variables Contributions
@@ -856,16 +844,15 @@ class PCAshiny:
             
             @reactive.Calc
             def VarContribCorrMap():
-                VarContrib = get_pca_var(fa_model)["contrib"]
-                fig = fviz_corrplot(
-                    X=VarContrib,
-                    title=input.VarContribCorrTitle(),
-                    outline_color=input.VarContribCorrColor(),
-                    colors=[input.VarContribCorrLowColor(),
-                            input.VarContribCorrMidColor(),
-                            input.VarContribCorrHightColor()
-                            ]
-                    )+pn.theme_gray()
+                fig = fviz_corrplot(X=model.var_["contrib"],
+                                    title=input.VarContribCorrTitle(),
+                                    outline_color=input.VarContribCorrColor(),
+                                    colors=[input.VarContribCorrLowColor(),
+                                            input.VarContribCorrMidColor(),
+                                            input.VarContribCorrHightColor()
+                                            ],
+                                    ggtheme=pn.theme_gray()
+                                    )
                 return fig
 
             # Plot variables Contributions/correlations Map - PCA
@@ -879,9 +866,8 @@ class PCAshiny:
             @output
             @render.data_frame
             def VarCos2Table():
-                VarCos2 = get_pca_var(fa_model)["cos2"].round(4).reset_index().rename(columns={"index" : "Variables"})
-                return  DataTable(data=match_datalength(data=VarCos2,value=input.VarCos2Len()),
-                                filters=input.VarCos2Filter())
+                VarCos2 = model.var_["cos2"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                return  DataTable(data=match_datalength(data=VarCos2,value=input.VarCos2Len()),filters=input.VarCos2Filter())
             
             #-------------------------------------------------------------------------------------------------------------
             # Add Variables Cos2 Modal Show
@@ -892,13 +878,13 @@ class PCAshiny:
             
             @reactive.Calc
             def VarCos2Map():
-                fig = fviz_cosines(
-                    self=fa_model,
-                    choice="var",
-                    axis=input.VarCos2Axis(),
-                    top_cos2=int(input.VarCos2Top()),
-                    color=input.VarCos2Color(),
-                    bar_width=input.VarCos2BarWidth())
+                fig = fviz_cos2(self=model,
+                                choice="var",
+                                axis=input.VarCos2Axis(),
+                                top_cos2=int(input.VarCos2Top()),
+                                color=input.VarCos2Color(),
+                                bar_width=input.VarCos2BarWidth(),
+                                ggtheme=pn.theme_gray())
                 return fig
 
             # Plot variables Cos2
@@ -916,15 +902,14 @@ class PCAshiny:
             
             @reactive.Calc
             def VarCos2CorrMap():
-                VarCos2 = get_pca_var(fa_model)["cos2"]
-                fig = fviz_corrplot(
-                    X=VarCos2,
-                    title=input.VarCos2CorrTitle(),
-                    outline_color=input.VarCos2CorrColor(),
-                    colors=[input.VarCos2CorrLowColor(),
-                            input.VarCos2CorrMidColor(),
-                            input.VarCos2CorrHightColor()
-                            ])+pn.theme_gray()
+                fig = fviz_corrplot(X=model.var_["cos2"],
+                                    title=input.VarCos2CorrTitle(),
+                                    outline_color=input.VarCos2CorrColor(),
+                                    colors=[input.VarCos2CorrLowColor(),
+                                            input.VarCos2CorrMidColor(),
+                                            input.VarCos2CorrHightColor()
+                                            ],
+                                    ggtheme=pn.theme_gray())
                 return fig
 
             #--------------------------------------------------------------------------------------------------
@@ -940,9 +925,8 @@ class PCAshiny:
             @output
             @render.data_frame
             def VarSupCoordTable():
-                VarSupCoord = get_pca_var(fa_model)["quanti_sup"]["coord"].round(4).reset_index().rename(columns={"index" : "Variables"})
-                return DataTable(data=match_datalength(data=VarSupCoord,value=input.VarSupCoordLen()),
-                                filters=input.VarSupCoordFilter())
+                VarSupCoord = model.quanti_sup_["coord"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                return DataTable(data=match_datalength(data=VarSupCoord,value=input.VarSupCoordLen()),filters=input.VarSupCoordFilter())
             
             # Add Variables Cos2 Modal Show
             @reactive.Effect
@@ -954,16 +938,15 @@ class PCAshiny:
             @output
             @render.plot(alt="Supplementary Continuous Variables Coordinates Map - PCA")
             def VarSupCoordPlot():
-                VarSupCoord = get_pca_var(fa_model)["quanti_sup"]["coord"]
-                VarSupCoordFig = fviz_barplot(X=VarSupCoord,
-                                            ncp=fa_model.n_components_,
-                                            axis=input.VarSupCoordAxis(),
-                                            top_corr=int(input.VarSupCoordTop()),
-                                            color=input.VarSupCoordColor(),
-                                            bar_width=input.VarSupCoordBarWidth(),
-                                            xlabel="Correlation",
-                                            ylabel="Variables",
-                                            title=f"Correlation of supplementary continuous variables to Dim-{input.VarSupCoordAxis()+1}")
+                VarSupCoordFig = fviz_barplot(X=model.quanti_sup_["coord"],
+                                                ncp=model.call_["n_components"],
+                                                axis=input.VarSupCoordAxis(),
+                                                top_corr=int(input.VarSupCoordTop()),
+                                                color=input.VarSupCoordColor(),
+                                                bar_width=input.VarSupCoordBarWidth(),
+                                                xlabel="Correlation",
+                                                ylabel="Variables",
+                                                title=f"Correlation of supplementary continuous variables to Dim-{input.VarSupCoordAxis()+1}")
                 return VarSupCoordFig.draw()
             
             #----------------------------------------------------------------------------------------
@@ -971,9 +954,8 @@ class PCAshiny:
             @output
             @render.data_frame
             def VarSupCos2Table():
-                VarSupCos2 = get_pca_var(fa_model)["quanti_sup"]["cos2"].round(4).reset_index().rename(columns={"index" : "Variables"})
-                return DataTable(data=match_datalength(data=VarSupCos2,value=input.VarSupCos2Len()),
-                                filters=input.VarSupCos2Filter())
+                VarSupCos2 = model.quanti_sup_["cos2"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                return DataTable(data=match_datalength(data=VarSupCos2,value=input.VarSupCos2Len()),filters=input.VarSupCos2Filter())
             
             # Add Variables Cos2 Modal Show
             @reactive.Effect
@@ -985,12 +967,14 @@ class PCAshiny:
             @output
             @render.plot(alt="Supplementary continues variables Cosines Map - PCA")
             def VarSupCos2Plot():
-                VarSupCos2Fig = fviz_cosines(self=fa_model,
-                                          choice="quanti_sup",
-                                            axis=input.VarSupCos2Axis(),
-                                            top_cos2=int(input.VarSupCos2Top()),
+                VarSupCos2Fig = fviz_barplot(X=model.quanti_sup_["cos2"],
+                                             ncp=model.call_["n_components"],
+                                             axis=input.VarSupCos2Axis(),
+                                            top_corr=int(input.VarSupCos2Top()),
                                             color=input.VarSupCos2Color(),
-                                            bar_width=input.VarSupCos2BarWidth())
+                                            bar_width=input.VarSupCos2BarWidth(),
+                                            y_label=None,
+                                            title=f"Cosinus of supplementary continuous variables to Dim-{input.VarSupCos2Axis()+1}")
                 return VarSupCos2Fig.draw()
             
             # Add Variables cosinus/correlations Modal show
@@ -1002,18 +986,17 @@ class PCAshiny:
             # Add reactive figure
             @reactive.Calc
             def VarSupCos2CorrMap():
-                VarSupCos2 = get_pca_var(fa_model)["quanti_sup"]["cos2"]
-                fig = fviz_corrplot(
-                    X=VarSupCos2,
-                    title = input.VarSupCos2CorrTitle(),
-                    outline_color=input.VarSupCos2CorrColor(),
-                    colors=[input.VarSupCos2CorrLowColor(),
-                            input.VarSupCos2CorrMidColor(),
-                            input.VarSupCos2CorrHightColor()
-                            ],
-                        ylabel="actives Variables",
-                        xlabel="Supplementary continuous variables"
-                    )+pn.theme_gray()
+                fig = fviz_corrplot(X=model.quanti_sup_["cos2"],
+                                    title = input.VarSupCos2CorrTitle(),
+                                    outline_color=input.VarSupCos2CorrColor(),
+                                    colors=[input.VarSupCos2CorrLowColor(),
+                                            input.VarSupCos2CorrMidColor(),
+                                            input.VarSupCos2CorrHightColor()
+                                            ],
+                                    y_label="Dimensions",
+                                    x_label="Supplementary continuous variables",
+                                    ggtheme=pn.theme_gray()
+                                    )
                 return fig
             
             # Plot variables cosinus/correlations
@@ -1030,17 +1013,15 @@ class PCAshiny:
             @output
             @render.data_frame
             def IndCoordTable():
-                IndCoord = get_pca_ind(fa_model)["coord"].round(4).reset_index()
-                return DataTable(data = match_datalength(IndCoord,input.IndCoordLen()),
-                                filters=input.IndCoordFilter())
+                IndCoord = model.ind_["coord"].round(4).reset_index()
+                return DataTable(data = match_datalength(IndCoord,input.IndCoordLen()),filters=input.IndCoordFilter())
             
             # Individuals Contributions
             @output
             @render.data_frame
             def IndContribTable():
-                IndContrib = get_pca_ind(fa_model)["contrib"].round(4).reset_index()
-                return  DataTable(data=match_datalength(IndContrib,input.IndContribLen()),
-                                filters=input.IndContribFilter())
+                IndContrib = model.ind_["contrib"].round(4).reset_index()
+                return  DataTable(data=match_datalength(IndContrib,input.IndContribLen()),filters=input.IndContribFilter())
             
             # Add indiviuals Contributions Modal Show
             @reactive.Effect
@@ -1052,12 +1033,13 @@ class PCAshiny:
             @output
             @render.plot(alt="Individuals Contributions Map - PCA")
             def IndContribPlot():
-                IndContribFig = fviz_contrib(self=fa_model,
+                IndContribFig = fviz_contrib(self=model,
                                             choice="ind",
                                             axis=input.IndContribAxis(),
                                             top_contrib=int(input.IndContribTop()),
                                             color = input.IndContribColor(),
-                                            bar_width= input.IndContribBarWidth())
+                                            bar_width= input.IndContribBarWidth(),
+                                            ggtheme=pn.theme_gray())
                 return IndContribFig.draw()
             
             # Add Variables Contributions Correlation Modal Show
@@ -1070,23 +1052,22 @@ class PCAshiny:
             @output
             @render.plot(alt="Individuals Contributions/Correlations Map - PCA")
             def IndContribCorrPlot():
-                IndContrib = get_pca_ind(fa_model)["contrib"]
-                IndContribCorrFig = fviz_corrplot(X=IndContrib,
-                                                title=input.IndContribCorrTitle(),
-                                                outline_color=input.IndContribCorrColor(),
-                                                colors=[input.IndContribCorrLowColor(),
-                                                        input.IndContribCorrMidColor(),
-                                                        input.IndContribCorrHightColor()
-                                                        ])+pn.theme_gray()
+                IndContribCorrFig = fviz_corrplot(X=model.ind_["contrib"],
+                                                  title=input.IndContribCorrTitle(),
+                                                  outline_color=input.IndContribCorrColor(),
+                                                  colors=[input.IndContribCorrLowColor(),
+                                                          input.IndContribCorrMidColor(),
+                                                          input.IndContribCorrHightColor()
+                                                          ],
+                                                   ggtheme=pn.theme_gray())
                 return IndContribCorrFig.draw()
             
             # Individuals Cos2 
             @output
             @render.data_frame
             def IndCos2Table():
-                IndCos2 = get_pca_ind(fa_model)["cos2"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndCos2,input.IndCos2Len()),
-                                filters=input.IndCos2Filter())
+                IndCos2 = model.ind_["cos2"].round(4).reset_index()
+                return  DataTable(data = match_datalength(IndCos2,input.IndCos2Len()),filters=input.IndCos2Filter())
             
             # Add Variables Cos2 Modal Show
             @reactive.Effect
@@ -1098,12 +1079,13 @@ class PCAshiny:
             @output
             @render.plot(alt="Individuals Cosines Map - PCA")
             def IndCos2Plot():
-                IndCos2Fig = fviz_cosines(self=fa_model,
-                                choice="ind",
-                                axis=input.IndCos2Axis(),
-                                top_cos2=int(input.IndCos2Top()),
-                                color=input.IndCos2Color(),
-                                bar_width=input.IndCos2BarWidth())
+                IndCos2Fig = fviz_cos2(self=model,
+                                       choice="ind",
+                                       axis=input.IndCos2Axis(),
+                                       top_cos2=int(input.IndCos2Top()),
+                                       color=input.IndCos2Color(),
+                                       bar_width=input.IndCos2BarWidth(),
+                                       ggtheme=pn.theme_gray())
                 return IndCos2Fig.draw()
             
             # Add Variables Cosines Correlation Modal Show
@@ -1116,14 +1098,14 @@ class PCAshiny:
             @output
             @render.plot(alt="Individuals Cosinus/Correlations Map - PCA")
             def IndCos2CorrPlot():
-                IndCos2 = get_pca_ind(fa_model)["cos2"]
-                IndCos2CorrFig = fviz_corrplot(X=IndCos2,
-                                            title=input.IndCos2CorrTitle(),
-                                            outline_color=input.IndCos2CorrColor(),
-                                            colors=[input.IndCos2CorrLowColor(),
-                                                    input.IndCos2CorrMidColor(),
-                                                    input.IndCos2CorrHightColor()
-                                                ])+pn.theme_gray()
+                IndCos2CorrFig = fviz_corrplot(X=model.ind_["cos2"],
+                                               title=input.IndCos2CorrTitle(),
+                                               outline_color=input.IndCos2CorrColor(),
+                                               colors=[input.IndCos2CorrLowColor(),
+                                                       input.IndCos2CorrMidColor(),
+                                                       input.IndCos2CorrHightColor()
+                                                ],
+                                                ggtheme=pn.theme_gray())
                 return IndCos2CorrFig.draw()
             
             #----------------------------------------------------------------------------
@@ -1131,17 +1113,15 @@ class PCAshiny:
             @output
             @render.data_frame
             def IndSupCoordTable():
-                IndSupCoord = get_pca_ind(fa_model)["ind_sup"]["coord"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndSupCoord,input.IndSupCoordLen()),
-                                filters=input.IndSupCoordFilter())
+                IndSupCoord = model.ind_sup_["coord"].round(4).reset_index()
+                return  DataTable(data = match_datalength(IndSupCoord,input.IndSupCoordLen()),filters=input.IndSupCoordFilter())
             
             # Supplementaru Individual Cos2
             @output
             @render.data_frame
             def IndSupCos2Table():
-                IndSupCos2 = get_pca_ind(fa_model)["ind_sup"]["cos2"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndSupCos2,input.IndSupCos2Len()),
-                                filters=input.IndSupCos2Filter())
+                IndSupCos2 = model.ind_sup_["cos2"].round(4).reset_index()
+                return  DataTable(data = match_datalength(IndSupCos2,input.IndSupCos2Len()),filters=input.IndSupCos2Filter())
             
             # Add Variables Cos2 Modal Show
             @reactive.Effect
@@ -1153,14 +1133,13 @@ class PCAshiny:
             @output
             @render.plot(alt="Supplementary Individuals Cosines Map - PCA")
             def IndSupCos2Plot():
-                IndSupCos2 = get_pca_ind(fa_model)["ind_sup"]["cos2"]
-                IndSupCos2Fig = fviz_barplot(X=IndSupCos2,
+                IndSupCos2Fig = fviz_barplot(X=model.ind_sup_["cos2"],
+                                             ncp=model.call_["n_components"],
                                             axis=input.IndSupCos2Axis(),
                                             top_corr=int(input.IndSupCos2Top()),
                                             color=input.IndSupCos2Color(),
                                             bar_width=input.IndSupCos2BarWidth(),
-                                            ylabel="Supplementary individuals",
-                                            xlabel="Cosinus",
+                                            y_label=None,
                                             title=f"Cosinus of supplementary individuals to Dim-{input.IndSupCos2Axis()+1}")
                 return IndSupCos2Fig.draw()
             
@@ -1174,15 +1153,15 @@ class PCAshiny:
             @output
             @render.plot(alt="Individuals Cosinus/Correlations Map - PCA")
             def IndSupCos2CorrPlot():
-                IndSupCos2 = get_pca_ind(fa_model)["ind_sup"]["cos2"]
-                IndSupCos2CorrFig = fviz_corrplot(X=IndSupCos2,
+                IndSupCos2CorrFig = fviz_corrplot(X=model.ind_sup_["cos2"],
                                                 title=input.IndSupCos2CorrTitle(),
                                                 outline_color=input.IndSupCos2CorrColor(),
                                                 colors=[input.IndSupCos2CorrLowColor(),
                                                         input.IndSupCos2CorrMidColor(),
                                                         input.IndSupCos2CorrHightColor()
                                                         ],
-                                                    xlabel="Supplementary individuals")+pn.theme_gray()
+                                                x_label="Supplementary individuals",
+                                                ggtheme=pn.theme_gray())
                 return IndSupCos2CorrFig.draw()
 
             #-------------------------------------------------------------------------------------------
@@ -1190,15 +1169,15 @@ class PCAshiny:
             @output
             @render.data_frame
             def VarQualCoordTable():
-                VarQualCoord = get_pca_var(fa_model)["quali_sup"]["coord"].round(4).reset_index()
+                VarQualCoord = model.quali_sup_["coord"].round(4).reset_index()
                 return  DataTable(data = match_datalength(VarQualCoord,input.VarQualCoordLen()),
-                                filters=input.VarQualCoordFilter())
+                                  filters=input.VarQualCoordFilter())
             
             # Value - Test categories variables
             @output
             @render.data_frame
             def VarQualVtestTable():
-                VarQualVtest = get_pca_var(fa_model)["quali_sup"]["vtest"].round(4).reset_index()
+                VarQualVtest = model.quali_sup_["vtest"].round(4).reset_index()
                 return  DataTable(data = match_datalength(VarQualVtest,input.VarQualVtestLen()),
                                 filters=input.VarQualVtestFilter())
             
@@ -1212,15 +1191,14 @@ class PCAshiny:
             @output
             @render.plot(alt="Supplementary categories V-test barplot Map - PCA")
             def VarQualVtestPlot():
-                VarQualVtest = get_pca_var(fa_model)["quali_sup"]["vtest"]
-                VarQualVtestFig = fviz_barplot(X=VarQualVtest,
-                                            axis=input.VarQualVtestAxis(),
-                                            top_corr=int(input.VarQualVtestTop()),
-                                            color=input.VarQualVtestColor(),
-                                            bar_width=input.VarQualVtestBarWidth(),
-                                            ylabel="Supplementary categories",
-                                            xlabel="V-test",
-                                            title=f"V-test of supplementary categories to Dim-{input.VarQualVtestAxis()+1}")
+                VarQualVtestFig = fviz_barplot(X=model.quali_sup_["vtest"],
+                                               ncp=model.call_["n_components"],
+                                                axis=input.VarQualVtestAxis(),
+                                                top_corr=int(input.VarQualVtestTop()),
+                                                color=input.VarQualVtestColor(),
+                                                bar_width=input.VarQualVtestBarWidth(),
+                                                y_label="V-test",
+                                                title=f"V-test of supplementary categories to Dim-{input.VarQualVtestAxis()+1}")
                 return VarQualVtestFig.draw()
             
             # Add Variables Cosines Correlation Modal Show
@@ -1233,15 +1211,15 @@ class PCAshiny:
             @output
             @render.plot(alt="Supplementary Categories Vtest Map - PCA")
             def VarQualVtestCorrPlot():
-                VarQualVtest = get_pca_var(fa_model)["quali_sup"]["vtest"]
-                VarQualVtestCorrFig = fviz_corrplot(X=VarQualVtest,
-                                                title=input.VarQualVtestCorrTitle(),
-                                                outline_color=input.VarQualVtestCorrColor(),
-                                                colors=[input.VarQualVtestCorrLowColor(),
-                                                        input.VarQualVtestCorrMidColor(),
-                                                        input.VarQualVtestCorrHightColor()
-                                                        ],
-                                                    xlabel="Supplementary categories")+pn.theme_gray()
+                VarQualVtestCorrFig = fviz_corrplot(X=model.quali_sup_["vtest"],
+                                                    title=input.VarQualVtestCorrTitle(),
+                                                    outline_color=input.VarQualVtestCorrColor(),
+                                                    colors=[input.VarQualVtestCorrLowColor(),
+                                                            input.VarQualVtestCorrMidColor(),
+                                                            input.VarQualVtestCorrHightColor()
+                                                            ],
+                                                    x_label="Supplementary categories",
+                                                    ggtheme=pn.theme_gray())
                 return VarQualVtestCorrFig.draw()
             
             #---------------------------------------------------------------------------------------
@@ -1249,7 +1227,7 @@ class PCAshiny:
             @output
             @render.ui
             def DimDesc():
-                if fa_model.quali_sup_labels_ is not None:
+                if model.quali_sup is not None:
                     return ui.TagList(
                         ui.h5("Quantitative"),
                         PanelConditional1(text="Dim1",name="Desc"),
@@ -1266,53 +1244,53 @@ class PCAshiny:
             @output
             @render.data_frame
             def Dim1DescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None,proba=input.pvalueDimdesc())
+                DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescQuanti = DimDesc[input.Dimdesc()]["quanti"].reset_index().rename(columns={"index":"Variables"})
                 elif isinstance(DimDesc[input.Dimdesc()],pd.DataFrame):
                     DimDescQuanti = DimDesc[input.Dimdesc()].reset_index().rename(columns={"index":"Variables"})
                 else:
                     DimDescQuanti = pd.DataFrame()
-                return  DataTable(data = match_datalength(DimDescQuanti,input.Dim1DescLen()),
-                                filters=input.Dim1DescFilter())
+                return  DataTable(data = match_datalength(DimDescQuanti,input.Dim1DescLen()),filters=input.Dim1DescFilter())
             
             @output
             @render.data_frame
             def Dim2DescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None,proba=input.pvalueDimdesc())
+                DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescQuali = DimDesc[input.Dimdesc()]["quali"].reset_index().rename(columns={"index":"Variables"})
                 else:
                     DimDescQuali = pd.DataFrame()
-                return  DataTable(data = match_datalength(DimDescQuali,input.Dim2DescLen()),
-                                filters=input.Dim2DescFilter())
+                return  DataTable(data = match_datalength(DimDescQuali,input.Dim2DescLen()),filters=input.Dim2DescFilter())
             
             #-----------------------------------------------------------------------------------------------
-            ### Statistiques descriptives
+            ## Statistiques descriptives
             @output
             @render.data_frame
             def StatsDescTable():
-                data = fa_model.active_data_
-                if fa_model.quanti_sup_labels_ is not None:
-                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+                data = model.call_["X"]
+                if model.quanti_sup is not None:
+                    quanti_sup = model.call_["Xtot"][model.quanti_sup_["coord"].index.tolist()]
+                    if model.ind_sup is not None:
+                        quanti_sup = quanti_sup.drop(index=model.ind_sup_["coord"].index.tolist())
+                    # Concatenate
                     data = pd.concat([data,quanti_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
-
+                
                 StatsDesc = data.describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
-                return  DataTable(data = match_datalength(StatsDesc,input.StatsDescLen()),
-                                filters=input.StatsDescFilter())
+                return  DataTable(data = match_datalength(StatsDesc,input.StatsDescLen()),filters=input.StatsDescFilter())
 
             # Histogramme
             @output
             @render.plot(alt="")
             def VarHistGraph():
-                data = fa_model.active_data_
-                if fa_model.quanti_sup_labels_ is not None:
-                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+                # Active data
+                data = model.call_["X"]
+                if model.quanti_sup is not None:
+                    quanti_sup = model.call_["Xtot"][model.quanti_sup_["coord"].index.tolist()]
+                    if model.ind_sup is not None:
+                        quanti_sup = quanti_sup.drop(index=model.ind_sup_["coord"].index.tolist())
+                    # Concatenate
                     data = pd.concat([data,quanti_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
 
                 p = pn.ggplot(data,pn.aes(x=input.VarLabel()))
                 # Add density
@@ -1330,15 +1308,17 @@ class PCAshiny:
             @output
             @render.data_frame
             def CorrMatrixTable():
-                data = fa_model.active_data_
-                if fa_model.quanti_sup_labels_ is not None:
-                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+                # Active data
+                data = model.call_["X"]
+                if model.quanti_sup is not None:
+                    quanti_sup = model.call_["Xtot"][model.quanti_sup_["coord"].index.tolist()]
+                    if model.ind_sup is not None:
+                        quanti_sup = quanti_sup.drop(index=model.ind_sup_["coord"].index.tolist())
+                    # Concatenate
                     data = pd.concat([data,quanti_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
+
                 corr_mat = data.corr(method="pearson").round(4).reset_index().rename(columns={"index":"Variables"})
-                return DataTable(data = match_datalength(corr_mat,input.CorrMatrixLen()),
-                                filters=input.CorrMatrixFilter())
+                return DataTable(data = match_datalength(corr_mat,input.CorrMatrixLen()),filters=input.CorrMatrixFilter())
             
             ##############################################################################################
             # Overall Daat
@@ -1347,9 +1327,8 @@ class PCAshiny:
             @output
             @render.data_frame
             def OverallDataTable():
-                overalldata = fa_model.data_.reset_index()
-                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),
-                                filters=input.OverallDataFilter())
+                overalldata = model.call_["Xtot"].reset_index()
+                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),filters=input.OverallDataFilter())
             
         self.app_ui = app_ui
         self.app_server = server

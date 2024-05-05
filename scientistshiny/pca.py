@@ -43,19 +43,23 @@ class PCAshiny(BaseEstimator,TransformerMixin):
     Returns:
     -------
     Graphs : a tab containing the individuals factor map and the variables factor map
+
     Values : a tab containing the summary of the PCA performed, the eigenvalue, the results
              for the variables, the results for the individuals, the results for the supplementary
              variables and the results for the categorical variables.
+
     Automatic description of axes : a tab containing the output of the dimdesc function. This function is designed to 
                                     point out the variables and the categories that are the most characteristic according
                                     to each dimension obtained by a Factor Analysis.
+
     Summary of dataset : A tab containing the summary of the dataset and a boxplot and histogramm for quantitative variables.
+
     Data : a tab containing the dataset with a nice display.
 
     The left part of the application allows to change some elements of the graphs (axes, variables, colors,.)
 
     Author(s)
-    --------
+    ---------
     Duvérier DJIFACK ZEBAZE duverierdjifack@gmail.com
 
     Examples:
@@ -103,8 +107,9 @@ class PCAshiny(BaseEstimator,TransformerMixin):
             var_labels = [*var_labels,*model.quanti_sup_["coord"].index.tolist()]
 
         # Dimension criteria
+        nbDim = min(3,model.call_["n_components"])
         DimDescChoice = {}
-        for i in range(min(3,model.call_["n_components"])):
+        for i in range(nbDim):
             DimDescChoice.update({"Dim."+str(i+1) : "Dimension "+str(i+1)})
 
         ################################################# Start App
@@ -156,7 +161,7 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                         ui.input_text(
                             id="IndTitle",
                             label="Titre du graphe",
-                            value=None,
+                            value="Individuals Factor Map - PCA",
                             width="100%"
                         ),
                         ui.output_ui("choixindmod"),
@@ -230,7 +235,7 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                         ui.input_text(
                                 id="VarTitle",
                                 label='Titre du graphe',
-                                value=None,
+                                value="Variables Factor Map - PCA",
                                 width="100%"
                         ),
                         ui.input_slider(
@@ -363,6 +368,7 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                             selected="StatsDesc",
                             width="100%",
                             inline=True),
+                            ui.br(),
                         ui.panel_conditional("input.ResumeChoice==='StatsDesc'",
                             PanelConditional1(text="StatsDesc",name="")
                         ),
@@ -560,45 +566,6 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                             width="100%"
                         )
                     )
-            #-------------------------------------------------------------------------------------------------
-            # Add individuals Supplementary Conditional Panel
-            @output
-            @render.ui
-            def IndSupPanel():
-                return ui.panel_conditional("input.choice == 'IndSupRes'",
-                            ui.br(),
-                            ui.h5("Coordonnées"),
-                            PanelConditional1(text="IndSup",name="Coord"),
-                            ui.hr(),
-                            ui.h5("Cos2 - Qualité de la représentation"),
-                            PanelConditional2(text="IndSup",name="Cos2") 
-                        )
-            
-            # Add Continuous Supplementary Conditional Panel
-            @output
-            @render.ui
-            def VarSupPanel():
-                return ui.panel_conditional("input.choice == 'VarSupRes'",
-                            ui.br(),
-                            ui.h5("Coordonnées"),
-                            PanelConditional1(text="VarSup",name="Coord"),
-                            ui.hr(),
-                            ui.h5("Cos2 - Qualité de la représentation"),
-                            PanelConditional2(text="VarSup",name="Cos2")
-                        )
-            
-            # Add Categories Supplementary Conditional Panel
-            @output
-            @render.ui
-            def VarQualPanel():
-                return ui.panel_conditional("input.choice == 'VarQualRes'",
-                            ui.br(),
-                            ui.h5("Coordonnées"),
-                            PanelConditional1(text="VarQual",name="Coord"),
-                            ui.hr(),
-                            ui.h5("V-test"),
-                            PanelConditional2(text="VarQual",name="Vtest")
-                        )
 
             # -------------------------------------------------------
             @reactive.Effect
@@ -795,19 +762,19 @@ class PCAshiny(BaseEstimator,TransformerMixin):
             #   Continuous Variables
             #####################################################################################################
             #---------------------------------------------------------------------------------------------
-            # Variables Coordinates
-            @output
+            # Variables Coordinates/Coorelations
             @render.data_frame
             def VarCoordTable():
-                VarCoord = model.var_["coord"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                VarCoord = model.var_["coord"].round(4).reset_index()
+                VarCoord.columns = ["Variables", *VarCoord.columns[1:]]
                 return DataTable(data=match_datalength(data=VarCoord,value=input.VarCoordLen()),filters=input.VarCoordFilter())
             
             #----------------------------------------------------------------------------------------------------
             # Variables Contributions
-            @output
             @render.data_frame
             def VarContribTable():
-                VarContrib = model.var_["contrib"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                VarContrib = model.var_["contrib"].round(4).reset_index()
+                VarContrib.columns = ["Variables", *VarContrib.columns[1:]]
                 return  DataTable(data=match_datalength(data=VarContrib,value=input.VarContribLen()),filters=input.VarContribFilter())
             
             #-----------------------------------------------------------------------------------------------------
@@ -835,38 +802,12 @@ class PCAshiny(BaseEstimator,TransformerMixin):
             def VarContribPlot():
                 return VarContribMap().draw()
             
-            #----------------------------------------------------------------------------------------------------------------
-            # Add Variables Contributions Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Var",name="Contrib",title=None)
-            
-            @reactive.Calc
-            def VarContribCorrMap():
-                fig = fviz_corrplot(X=model.var_["contrib"],
-                                    title=input.VarContribCorrTitle(),
-                                    outline_color=input.VarContribCorrColor(),
-                                    colors=[input.VarContribCorrLowColor(),
-                                            input.VarContribCorrMidColor(),
-                                            input.VarContribCorrHightColor()
-                                            ],
-                                    ggtheme=pn.theme_gray()
-                                    )
-                return fig
-
-            # Plot variables Contributions/correlations Map - PCA
-            @output
-            @render.plot(alt="Variables Contributions/Correlations Map - PCA")
-            def VarContribCorrPlot():
-                return VarContribCorrMap().draw()
-            
             #-----------------------------------------------------------------------------------------------------------
             # Variables Cos2 
-            @output
             @render.data_frame
             def VarCos2Table():
-                VarCos2 = model.var_["cos2"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                VarCos2 = model.var_["cos2"].round(4).reset_index()
+                VarCos2.columns = ["Variables", *VarCos2.columns[1:]]
                 return  DataTable(data=match_datalength(data=VarCos2,value=input.VarCos2Len()),filters=input.VarCos2Filter())
             
             #-------------------------------------------------------------------------------------------------------------
@@ -892,128 +833,48 @@ class PCAshiny(BaseEstimator,TransformerMixin):
             @render.plot(alt="Variables Cosines Map - PCA")
             def VarCos2Plot():
                 return VarCos2Map().draw()
-            
-            #----------------------------------------------------------------------------------------
-            # Add Variables Cosinus Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Var",name="Cos2",title=None)
-            
-            @reactive.Calc
-            def VarCos2CorrMap():
-                fig = fviz_corrplot(X=model.var_["cos2"],
-                                    title=input.VarCos2CorrTitle(),
-                                    outline_color=input.VarCos2CorrColor(),
-                                    colors=[input.VarCos2CorrLowColor(),
-                                            input.VarCos2CorrMidColor(),
-                                            input.VarCos2CorrHightColor()
-                                            ],
-                                    ggtheme=pn.theme_gray())
-                return fig
-
-            #--------------------------------------------------------------------------------------------------
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Variables Contributions/Correlations Map - PCA")
-            def VarCos2CorrPlot():
-                return VarCos2CorrMap().draw()
 
             #---------------------------------------------------------------------------------
             ## Supplementary Continuous Variables
-            # Continuous Variables Coordinates
+            #---------------------------------------------------------------------------------
+            # Add Continuous Supplementary Conditional Panel
             @output
+            @render.ui
+            def VarSupPanel():
+                return ui.panel_conditional("input.choice == 'VarSupRes'",
+                            ui.br(),
+                            ui.h5("Coordonnées"),
+                            PanelConditional1(text="VarSup",name="Coord"),
+                            ui.hr(),
+                            ui.h5("Cos2 - Qualité de la représentation"),
+                            PanelConditional1(text="VarSup",name="Cos2")
+                        )
+            
+            # Continuous Variables Coordinates
             @render.data_frame
             def VarSupCoordTable():
-                VarSupCoord = model.quanti_sup_["coord"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                VarSupCoord = model.quanti_sup_["coord"].round(4).reset_index()
+                VarSupCoord.columns = ["Variables", *VarSupCoord.columns[1:]]
                 return DataTable(data=match_datalength(data=VarSupCoord,value=input.VarSupCoordLen()),filters=input.VarSupCoordFilter())
-            
-            # Add Variables Cos2 Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarSupCorrGraphBtn)
-            def _():
-                GraphModalShow(text="VarSup",name="Coord")
-
-            # Plot variables Cos2
-            @output
-            @render.plot(alt="Supplementary Continuous Variables Coordinates Map - PCA")
-            def VarSupCoordPlot():
-                VarSupCoordFig = fviz_barplot(X=model.quanti_sup_["coord"],
-                                                ncp=model.call_["n_components"],
-                                                axis=input.VarSupCoordAxis(),
-                                                top_corr=int(input.VarSupCoordTop()),
-                                                color=input.VarSupCoordColor(),
-                                                bar_width=input.VarSupCoordBarWidth(),
-                                                xlabel="Correlation",
-                                                ylabel="Variables",
-                                                title=f"Correlation of supplementary continuous variables to Dim-{input.VarSupCoordAxis()+1}")
-                return VarSupCoordFig.draw()
             
             #----------------------------------------------------------------------------------------
             # Supplementary Cosinus
             @output
             @render.data_frame
             def VarSupCos2Table():
-                VarSupCos2 = model.quanti_sup_["cos2"].round(4).reset_index().rename(columns={"index" : "Variables"})
+                VarSupCos2 = model.quanti_sup_["cos2"].round(4).reset_index()
+                VarSupCos2.columns = ["Variables", *VarSupCos2.columns[1:]]
                 return DataTable(data=match_datalength(data=VarSupCos2,value=input.VarSupCos2Len()),filters=input.VarSupCos2Filter())
-            
-            # Add Variables Cos2 Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarSupCos2GraphBtn)
-            def _():
-                GraphModalShow(text="VarSup",name="Cos2")
-
-            # Plot variables Cos2
-            @output
-            @render.plot(alt="Supplementary continues variables Cosines Map - PCA")
-            def VarSupCos2Plot():
-                VarSupCos2Fig = fviz_barplot(X=model.quanti_sup_["cos2"],
-                                             ncp=model.call_["n_components"],
-                                             axis=input.VarSupCos2Axis(),
-                                            top_corr=int(input.VarSupCos2Top()),
-                                            color=input.VarSupCos2Color(),
-                                            bar_width=input.VarSupCos2BarWidth(),
-                                            y_label=None,
-                                            title=f"Cosinus of supplementary continuous variables to Dim-{input.VarSupCos2Axis()+1}")
-                return VarSupCos2Fig.draw()
-            
-            # Add Variables cosinus/correlations Modal show
-            @reactive.Effect
-            @reactive.event(input.VarSupCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="VarSup",name="Cos2",title=None)
-            
-            # Add reactive figure
-            @reactive.Calc
-            def VarSupCos2CorrMap():
-                fig = fviz_corrplot(X=model.quanti_sup_["cos2"],
-                                    title = input.VarSupCos2CorrTitle(),
-                                    outline_color=input.VarSupCos2CorrColor(),
-                                    colors=[input.VarSupCos2CorrLowColor(),
-                                            input.VarSupCos2CorrMidColor(),
-                                            input.VarSupCos2CorrHightColor()
-                                            ],
-                                    y_label="Dimensions",
-                                    x_label="Supplementary continuous variables",
-                                    ggtheme=pn.theme_gray()
-                                    )
-                return fig
-            
-            # Plot variables cosinus/correlations
-            @output
-            @render.plot(alt="Supplementary Continuous Variables Cosinus/correlations Map - PCA")
-            def VarSupCos2CorrPlot():
-                return VarSupCos2CorrMap().draw()
             
             ########################################################################################################
             # Individuals informations
-            ##########################################################################################################
-            #---------------------------------------------------------------------------------------------
+            #########################################################################################################
             # Individuals Coordinates
             @output
             @render.data_frame
             def IndCoordTable():
                 IndCoord = model.ind_["coord"].round(4).reset_index()
+                IndCoord.columns = ["Individus", *IndCoord.columns[1:]]
                 return DataTable(data = match_datalength(IndCoord,input.IndCoordLen()),filters=input.IndCoordFilter())
             
             # Individuals Contributions
@@ -1021,6 +882,7 @@ class PCAshiny(BaseEstimator,TransformerMixin):
             @render.data_frame
             def IndContribTable():
                 IndContrib = model.ind_["contrib"].round(4).reset_index()
+                IndContrib.columns = ["Individus", *IndContrib.columns[1:]]
                 return  DataTable(data=match_datalength(IndContrib,input.IndContribLen()),filters=input.IndContribFilter())
             
             # Add indiviuals Contributions Modal Show
@@ -1042,31 +904,12 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                                             ggtheme=pn.theme_gray())
                 return IndContribFig.draw()
             
-            # Add Variables Contributions Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Ind",name="Contrib",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Contributions/Correlations Map - PCA")
-            def IndContribCorrPlot():
-                IndContribCorrFig = fviz_corrplot(X=model.ind_["contrib"],
-                                                  title=input.IndContribCorrTitle(),
-                                                  outline_color=input.IndContribCorrColor(),
-                                                  colors=[input.IndContribCorrLowColor(),
-                                                          input.IndContribCorrMidColor(),
-                                                          input.IndContribCorrHightColor()
-                                                          ],
-                                                   ggtheme=pn.theme_gray())
-                return IndContribCorrFig.draw()
-            
             # Individuals Cos2 
             @output
             @render.data_frame
             def IndCos2Table():
                 IndCos2 = model.ind_["cos2"].round(4).reset_index()
+                IndCos2.columns = ["Individus", *IndCos2.columns[1:]]
                 return  DataTable(data = match_datalength(IndCos2,input.IndCos2Len()),filters=input.IndCos2Filter())
             
             # Add Variables Cos2 Modal Show
@@ -1088,139 +931,84 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                                        ggtheme=pn.theme_gray())
                 return IndCos2Fig.draw()
             
-            # Add Variables Cosines Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Ind",name="Cos2",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Cosinus/Correlations Map - PCA")
-            def IndCos2CorrPlot():
-                IndCos2CorrFig = fviz_corrplot(X=model.ind_["cos2"],
-                                               title=input.IndCos2CorrTitle(),
-                                               outline_color=input.IndCos2CorrColor(),
-                                               colors=[input.IndCos2CorrLowColor(),
-                                                       input.IndCos2CorrMidColor(),
-                                                       input.IndCos2CorrHightColor()
-                                                ],
-                                                ggtheme=pn.theme_gray())
-                return IndCos2CorrFig.draw()
-            
             #----------------------------------------------------------------------------
-            # Supplementaru Individual Coordinates
+            #---------------------------------------------------------------------------------------------
+            # Add individuals Supplementary Conditional Panel
             @output
+            @render.ui
+            def IndSupPanel():
+                return ui.panel_conditional("input.choice == 'IndSupRes'",
+                            ui.br(),
+                            ui.h5("Coordonnées"),
+                            PanelConditional1(text="IndSup",name="Coord"),
+                            ui.hr(),
+                            ui.h5("Cos2 - Qualité de la représentation"),
+                            PanelConditional1(text="IndSup",name="Cos2") 
+                        )
+            
+            # Supplementary Individual Coordinates
             @render.data_frame
             def IndSupCoordTable():
                 IndSupCoord = model.ind_sup_["coord"].round(4).reset_index()
+                IndSupCoord.columns = ["Individus", *IndSupCoord.columns[1:]]
                 return  DataTable(data = match_datalength(IndSupCoord,input.IndSupCoordLen()),filters=input.IndSupCoordFilter())
             
-            # Supplementaru Individual Cos2
+            # Supplementary Individual Cos2
             @output
             @render.data_frame
             def IndSupCos2Table():
                 IndSupCos2 = model.ind_sup_["cos2"].round(4).reset_index()
+                IndSupCos2.columns = ["Individus", *IndSupCos2.columns[1:]]
                 return  DataTable(data = match_datalength(IndSupCos2,input.IndSupCos2Len()),filters=input.IndSupCos2Filter())
             
-            # Add Variables Cos2 Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndSupCos2GraphBtn)
-            def _():
-                GraphModalShow(text="IndSup",name="Cos2")
-
-            # Plot variables Cos2
+            #------------------------------------------------------------------------------------------
+            # Supplementary qualitatives variables
+            ##-----------------------------------------------------------------------------------------
+            # Add Categories Supplementary Conditional Panel
             @output
-            @render.plot(alt="Supplementary Individuals Cosines Map - PCA")
-            def IndSupCos2Plot():
-                IndSupCos2Fig = fviz_barplot(X=model.ind_sup_["cos2"],
-                                             ncp=model.call_["n_components"],
-                                            axis=input.IndSupCos2Axis(),
-                                            top_corr=int(input.IndSupCos2Top()),
-                                            color=input.IndSupCos2Color(),
-                                            bar_width=input.IndSupCos2BarWidth(),
-                                            y_label=None,
-                                            title=f"Cosinus of supplementary individuals to Dim-{input.IndSupCos2Axis()+1}")
-                return IndSupCos2Fig.draw()
-            
-            # Add Variables Cosines Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndSupCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="IndSup",name="Cos2",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Cosinus/Correlations Map - PCA")
-            def IndSupCos2CorrPlot():
-                IndSupCos2CorrFig = fviz_corrplot(X=model.ind_sup_["cos2"],
-                                                title=input.IndSupCos2CorrTitle(),
-                                                outline_color=input.IndSupCos2CorrColor(),
-                                                colors=[input.IndSupCos2CorrLowColor(),
-                                                        input.IndSupCos2CorrMidColor(),
-                                                        input.IndSupCos2CorrHightColor()
-                                                        ],
-                                                x_label="Supplementary individuals",
-                                                ggtheme=pn.theme_gray())
-                return IndSupCos2CorrFig.draw()
-
-            #-------------------------------------------------------------------------------------------
-            # Supplementary categories variables
-            @output
+            @render.ui
+            def VarQualPanel():
+                return ui.panel_conditional("input.choice == 'VarQualRes'",
+                            ui.br(),
+                            ui.h5("Coordonnées"),
+                            PanelConditional1(text="VarQual",name="Coord"),
+                            ui.hr(),
+                            ui.h5("Cos2 - Qualité de la représentation"),
+                            PanelConditional1(text="VarQual",name="Cos2"),
+                            ui.hr(),
+                            ui.h5("V-test"),
+                            PanelConditional1(text="VarQual",name="Vtest"),
+                            ui.hr(),
+                            ui.h5("Eta2 - Rapport de correlation"),
+                            PanelConditional1(text="VarQual",name="Eta2"),
+                        )
+            # Supplementary qualitatives variables coordinates
             @render.data_frame
             def VarQualCoordTable():
                 VarQualCoord = model.quali_sup_["coord"].round(4).reset_index()
-                return  DataTable(data = match_datalength(VarQualCoord,input.VarQualCoordLen()),
-                                  filters=input.VarQualCoordFilter())
+                VarQualCoord.columns = ["Categories", *VarQualCoord.columns[1:]]
+                return  DataTable(data = match_datalength(VarQualCoord,input.VarQualCoordLen()),filters=input.VarQualCoordFilter())
+            
+            # Supplementary qualitatives variables cos2
+            @render.data_frame
+            def VarQualCos2Table():
+                VarQualCos2 = model.quali_sup_["cos2"].round(4).reset_index()
+                VarQualCos2.columns = ["Categories", *VarQualCos2.columns[1:]]
+                return  DataTable(data = match_datalength(VarQualCos2,input.VarQualCos2Len()),filters=input.VarQualCos2Filter())
             
             # Value - Test categories variables
-            @output
             @render.data_frame
             def VarQualVtestTable():
                 VarQualVtest = model.quali_sup_["vtest"].round(4).reset_index()
-                return  DataTable(data = match_datalength(VarQualVtest,input.VarQualVtestLen()),
-                                filters=input.VarQualVtestFilter())
+                VarQualVtest.columns = ["Categories", *VarQualVtest.columns[1:]]
+                return  DataTable(data = match_datalength(VarQualVtest,input.VarQualVtestLen()),filters=input.VarQualVtestFilter())
             
-            # Add Variables Cos2 Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarQualVtestGraphBtn)
-            def _():
-                GraphModalShow(text="VarQual",name="Vtest")
-            
-            # Plot categories V-test
-            @output
-            @render.plot(alt="Supplementary categories V-test barplot Map - PCA")
-            def VarQualVtestPlot():
-                VarQualVtestFig = fviz_barplot(X=model.quali_sup_["vtest"],
-                                               ncp=model.call_["n_components"],
-                                                axis=input.VarQualVtestAxis(),
-                                                top_corr=int(input.VarQualVtestTop()),
-                                                color=input.VarQualVtestColor(),
-                                                bar_width=input.VarQualVtestBarWidth(),
-                                                y_label="V-test",
-                                                title=f"V-test of supplementary categories to Dim-{input.VarQualVtestAxis()+1}")
-                return VarQualVtestFig.draw()
-            
-            # Add Variables Cosines Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarQualVtestCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="VarQual",name="Vtest",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Supplementary Categories Vtest Map - PCA")
-            def VarQualVtestCorrPlot():
-                VarQualVtestCorrFig = fviz_corrplot(X=model.quali_sup_["vtest"],
-                                                    title=input.VarQualVtestCorrTitle(),
-                                                    outline_color=input.VarQualVtestCorrColor(),
-                                                    colors=[input.VarQualVtestCorrLowColor(),
-                                                            input.VarQualVtestCorrMidColor(),
-                                                            input.VarQualVtestCorrHightColor()
-                                                            ],
-                                                    x_label="Supplementary categories",
-                                                    ggtheme=pn.theme_gray())
-                return VarQualVtestCorrFig.draw()
+            # Value - Test categories variables
+            @render.data_frame
+            def VarQualEta2Table():
+                VarQualEta2 = model.quali_sup_["eta2"].round(4).reset_index()
+                VarQualEta2.columns = ["Variables", *VarQualEta2.columns[1:]]
+                return  DataTable(data = match_datalength(VarQualEta2,input.VarQualEta2Len()),filters=input.VarQualEta2Filter())
             
             #---------------------------------------------------------------------------------------
             # Description of axis
@@ -1241,7 +1029,6 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                         PanelConditional1(text="Dim1",name="Desc")
                     )
             
-            @output
             @render.data_frame
             def Dim1DescTable():
                 DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
@@ -1253,19 +1040,17 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                     DimDescQuanti = pd.DataFrame()
                 return  DataTable(data = match_datalength(DimDescQuanti,input.Dim1DescLen()),filters=input.Dim1DescFilter())
             
-            @output
             @render.data_frame
             def Dim2DescTable():
                 DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
                 if isinstance(DimDesc[input.Dimdesc()],dict):
-                    DimDescQuali = DimDesc[input.Dimdesc()]["quali"].reset_index().rename(columns={"index":"Variables"})
+                    DimDescQuali = DimDesc[input.Dimdesc()]["quali"].reset_index().rename(columns={"index":"Variables"})[["Variables","Eta2","pvalue"]]
                 else:
                     DimDescQuali = pd.DataFrame()
                 return  DataTable(data = match_datalength(DimDescQuali,input.Dim2DescLen()),filters=input.Dim2DescFilter())
             
             #-----------------------------------------------------------------------------------------------
             ## Statistiques descriptives
-            @output
             @render.data_frame
             def StatsDescTable():
                 data = model.call_["X"]
@@ -1305,7 +1090,6 @@ class PCAshiny(BaseEstimator,TransformerMixin):
                 return p.draw()
 
             # Matrice des corrélations
-            @output
             @render.data_frame
             def CorrMatrixTable():
                 # Active data
@@ -1324,7 +1108,6 @@ class PCAshiny(BaseEstimator,TransformerMixin):
             # Overall Daat
             ###############################################################################################################
             # Overall Data
-            @output
             @render.data_frame
             def OverallDataTable():
                 overalldata = model.call_["Xtot"].reset_index()

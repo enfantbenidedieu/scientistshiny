@@ -9,25 +9,9 @@ import nest_asyncio
 import uvicorn
 
 #  All scientisttools fonctions
-from scientisttools.ggplot import (
-    fviz_famd_ind,
-    fviz_famd_mod,
-    fviz_famd_var,
-    fviz_famd_col,
-    fviz_eig, 
-    fviz_contrib,
-    fviz_cosines,
-    fviz_corrplot,
-    fviz_corrcircle)
-from scientisttools.extractfactor import (
-    get_eig,
-    get_famd_ind,
-    get_famd_var,
-    get_famd_mod,
-    get_famd_col,
-    dimdesc)
+from scientisttools import fviz_famd_ind, fviz_famd_mod,fviz_famd_var,fviz_famd_col,fviz_eig, fviz_contrib,fviz_cos2,fviz_corrplot, fviz_corrcircle,dimdesc
 
-from scientistshiny.function import *
+from .function import *
 
 colors = mcolors.CSS4_COLORS
 colors["cos2"] = "cos2"
@@ -38,7 +22,7 @@ css_path = Path(__file__).parent / "www" / "style.css"
 class FAMDshiny:
     """
     Factor Analysis of Mixed Data (FAMD) with scientistshiny
-    -------------------------------------------------------
+    --------------------------------------------------------
 
     Description
     -----------
@@ -47,7 +31,7 @@ class FAMDshiny:
 
     Usage
     -----
-    FAMDshiny(fa_model)
+    FAMDshiny(model)
 
     Parameters:
     ----------
@@ -56,13 +40,17 @@ class FAMDshiny:
     Returns:
     -------
     Graphs : a tab containing the individuals factor map and the variables factor map
+
     Values : a tab containing the summary of the FAMD performed, the eigenvalue, the results
              for the variables, the results for the individuals, the results for the supplementary
              variables and the results for the categorical variables.
+
     Automatic description of axes : a tab containing the output of the dimdesc function. This function is designed to 
                                     point out the variables and the categories that are the most characteristic according
                                     to each dimension obtained by a Factor Analysis.
+
     Summary of dataset : A tab containing the summary of the dataset and a boxplot and histogramm for quantitative variables.
+
     Data : a tab containing the dataset with a nice display.
 
     The left part of the application allows to change some elements of the graphs (axes, variables, colors,.)
@@ -73,7 +61,7 @@ class FAMDshiny:
 
     Examples:
     ---------
-    > from scientisttools.decomposition import FAMD
+    > from scientisttools import FAMD
     > from scientistshiny import FAMDshiny
 
 
@@ -82,9 +70,10 @@ class FAMDshiny:
     """
 
 
-    def __init__(self,fa_model=None):
-        if fa_model.model_ != "famd":
-            raise ValueError("Error : 'fa_model' must be an instance of class FAMD")
+    def __init__(self,model=None):
+        # Check if model FAMD
+        if model.model_ != "famd":
+            raise ValueError("'model' must be an instance of class FAMD")
         
         # -----------------------------------------------------------------------------------
         # Initialise value choice
@@ -93,30 +82,33 @@ class FAMDshiny:
                         "IndRes"        : "Résultats sur les individus",
                         "VarQuantRes"   : "Résultats sur les variables quantitatives",
                         "VarQualRes"    : "Résultats sur les variables qualitatives"}
-        if fa_model.row_sup_labels_ is not None:
-            value_choice.update({"IndSupRes" : "Résultats des individus supplémentaires"})
-        if fa_model.quanti_sup_labels_ is not None:
-            value_choice.update({"VarQuantSupRes" : "Résultats des variables quantitatives supplémentaires"})
-        if fa_model.quali_sup_labels_ is not None:
-            value_choice.update({"ModSupRes"     : "Résultats des modalités supplémentaires"})
-            value_choice.update({"VarQualSupRes" : "Résultats des variables qualitatives supplémentaires"})
+        
+        if model.ind_sup is not None:
+            value_choice = {**value_choice,**{"IndSupRes" : "Résultats des individus supplémentaires"}}
+            
+        # Check if supplementary quantitatives variables
+        if model.quanti_sup is not None:
+            value_choice = {**value_choice, **{"VarQuantSupRes" : "Résultats des variables quantitatives supplémentaires"}}
+        
+        # Check if supplementary qualitatives variables
+        if model.quali_sup is not None:
+            value_choice = {**value_choice,**{"ModSupRes"     : "Résultats des modalités supplémentaires",
+                                              "VarQualSupRes" : "Résultats des variables qualitatives supplémentaires"}}
         
         # Dim Desc Choice
         DimDescChoice = {}
-        for i in range(min(3,fa_model.n_components_)):
+        for i in range(min(3,model.call_["n_components"])):
             DimDescChoice.update({"Dim."+str(i+1) : "Dimension "+str(i+1)})
 
         # Quantitatives variables (Actives + supplementary)
-        VarQuantLabelChoice = list(fa_model.quanti_labels_)
-        if fa_model.quanti_sup_labels_ is not None:
-            for i in range(len(fa_model.quanti_sup_labels_)):
-                VarQuantLabelChoice.insert(len(VarQuantLabelChoice)+1,fa_model.quanti_sup_labels_[i])
+        VarQuantLabelChoice = model.quanti_var_["coord"].index.tolist()
+        if model.quanti_sup is not None:
+            VarQuantLabelChoice = [*VarQuantLabelChoice,*model.quanti_sup_["coord"].index.tolist()]
          
         # Qualitatives variables (Actives + Supplementary)
-        VarQualLabelChoice = list(fa_model.quali_labels_)
-        if fa_model.quali_sup_labels_ is not None:
-            for i in range(len(fa_model.quali_sup_labels_)):
-                VarQualLabelChoice.insert(len(VarQualLabelChoice)+1,fa_model.quali_sup_labels_[i])
+        VarQualLabelChoice = [x for x in model.var_["coord"].index.tolist() if x  not in VarQuantLabelChoice]
+        if model.quali_sup is not None:
+            VarQualLabelChoice = [*VarQualLabelChoice,*model.quali_sup_["eta2"].index.tolist()]
         
         # UI
         app_ui = ui.page_fluid(
@@ -135,7 +127,7 @@ class FAMDshiny:
                         ui.input_select(
                             id="Axis1",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=0,
                             multiple=False
                         ),
@@ -145,7 +137,7 @@ class FAMDshiny:
                         ui.input_select(
                             id="Axis2",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=1,
                             multiple=False
                         ),
@@ -423,7 +415,7 @@ class FAMDshiny:
                     width="25%"
                 ),
                 ui.navset_card_tab(
-                    ui.nav("Graphes",
+                    ui.nav_panel("Graphes",
                         ui.row(
                             ui.column(6,
                                 ui.div(ui.output_plot("RowFactorMap",width='100%', height='500px'),align="center"),
@@ -466,7 +458,7 @@ class FAMDshiny:
                             )
                         ),
                     ),
-                    ui.nav("Valeurs",
+                    ui.nav_panel("Valeurs",
                         ui.input_radio_buttons(id="choice",label=ui.h6("Quelles sorties voulez-vous?"),choices=value_choice,inline=True),
                         ui.panel_conditional("input.choice ==='EigenRes'",
                             ui.br(),
@@ -499,7 +491,7 @@ class FAMDshiny:
                         ui.output_ui("ModSupPanel"),
                         ui.output_ui("VarQualSupPanel")
                     ),
-                    ui.nav("Description automatique des axes",
+                    ui.nav_panel("Description automatique des axes",
                         ui.row(
                             ui.column(7,ui.input_radio_buttons(id="pvalueDimdesc",label="Probabilité critique",choices={x:y for x,y in zip([0.01,0.05,0.1,1.0],["Significance level 1%","Significance level 5%","Significance level 10%","None"])},selected=0.05,width="100%",inline=True)),
                             ui.column(5,ui.input_radio_buttons(id="Dimdesc",label="Choisir les dimensions",choices=DimDescChoice,selected="Dim.1",inline=True))
@@ -510,7 +502,7 @@ class FAMDshiny:
                         ui.h5("Variables qualitatives"),
                         PanelConditional1(text="Dim2",name="Desc")
                     ),
-                    ui.nav("Résumé du jeu de données",
+                    ui.nav_panel("Résumé du jeu de données",
                         ui.input_radio_buttons(
                             id="ResumeChoice",
                             label=ui.h6("Quelles sorties voulez - vous?"),
@@ -566,9 +558,8 @@ class FAMDshiny:
                             )
                         )
                     ),
-                    ui.nav("Données",
+                    ui.nav_panel("Données",
                         PanelConditional1(text="OverallData",name="")
-                        
                     )
                 )
             )
@@ -582,7 +573,7 @@ class FAMDshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis1())
-                Dim = [i for i in range(fa_model.n_components_) if i > x]
+                Dim = [i for i in range(model.call_["n_components"]) if i > x]
                 ui.update_select(
                     id="Axis2",
                     label="",
@@ -593,7 +584,7 @@ class FAMDshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis2())
-                Dim = [i for i in range(fa_model.n_components_) if i < x]
+                Dim = [i for i in range(model.call_["n_components"]) if i < x]
                 ui.update_select(
                     id="Axis1",
                     label="",
@@ -605,7 +596,7 @@ class FAMDshiny:
             @output
             @render.ui
             def IndTextChoice():
-                if fa_model.row_sup_labels_ is not None:
+                if model.ind_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="IndTextActifColor",
@@ -664,7 +655,7 @@ class FAMDshiny:
             @output
             @render.ui
             def ModTextChoice():
-                if fa_model.quali_sup_labels_ is not None:
+                if model.quali_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="ModTextActifColor",
@@ -725,7 +716,7 @@ class FAMDshiny:
             @output
             @render.ui
             def VarPlotColorChoice():
-                if fa_model.quali_sup_labels_ is not None and fa_model.quanti_sup_labels_ is not None:
+                if model.quali_sup is not None and model.quanti_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="VarQualActifTextColor",
@@ -760,7 +751,7 @@ class FAMDshiny:
                             width="100%"
                         )
                     )
-                elif fa_model.quali_sup_labels_ is not None:
+                elif model.quali_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="VarQualActifTextColor",
@@ -787,7 +778,7 @@ class FAMDshiny:
                             width="100%"
                         )
                     )
-                elif fa_model.quanti_sup_labels_ is not None:
+                elif model.quanti_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="VarQualActifTextColor",
@@ -892,7 +883,7 @@ class FAMDshiny:
             @output
             @render.ui
             def VarQuantTextChoice():
-                if fa_model.quanti_sup_labels_ is not None:
+                if model.quanti_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="TextActifColor",
@@ -993,71 +984,66 @@ class FAMDshiny:
             @reactive.Calc
             def RowPlot():
                 if input.IndTextColor() == "actif/sup":
-                    if fa_model.row_sup_labels_ is not None:
-                        fig = fviz_famd_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.IndTextActifColor(),
-                            color_sup = input.IndTextSupColor(),
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            quali_sup=False,
-                            repel=input.IndPlotRepel()
-                        )
+                    if model.ind_sup is not None:
+                        fig = fviz_famd_ind(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            color=input.IndTextActifColor(),
+                                            color_sup = input.IndTextSupColor(),
+                                            text_size = input.IndTextSize(),
+                                            lim_contrib =input.IndLimContrib(),
+                                            lim_cos2 = input.IndLimCos2(),
+                                            title = input.IndTitle(),
+                                            quali_sup=False,
+                                            repel=input.IndPlotRepel(),
+                                            ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_famd_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.IndTextActifColor(),
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            quali_sup=False,
-                            repel=input.IndPlotRepel()
-                        )
+                        fig = fviz_famd_ind(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            color=input.IndTextActifColor(),
+                                            text_size = input.IndTextSize(),
+                                            lim_contrib =input.IndLimContrib(),
+                                            lim_cos2 = input.IndLimCos2(),
+                                            title = input.IndTitle(),
+                                            quali_sup=False,
+                                            repel=input.IndPlotRepel(),
+                                            ggtheme=pn.theme_gray())
                     return fig
                 elif input.IndTextColor() in ["cos2","contrib"]:
-                    return  fviz_famd_ind(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        color=input.IndTextColor(),
-                        text_size = input.IndTextSize(),
-                        lim_contrib =input.IndLimContrib(),
-                        lim_cos2 = input.IndLimCos2(),
-                        title = input.IndTitle(),
-                        quali_sup=False,
-                        repel=input.IndPlotRepel()
-                    )
+                    return  fviz_famd_ind(self=model,
+                                          axis=[int(input.Axis1()),int(input.Axis2())],
+                                          color=input.IndTextColor(),
+                                          text_size = input.IndTextSize(),
+                                          lim_contrib =input.IndLimContrib(),
+                                          lim_cos2 = input.IndLimCos2(),
+                                          title = input.IndTitle(),
+                                          quali_sup=False,
+                                          repel=input.IndPlotRepel(),
+                                          ggtheme=pn.theme_gray())
                 elif input.IndTextColor() == "varqual":
-                    return fviz_famd_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            habillage= input.IndTextVarQualColor(),
-                            add_ellipse=input.IndAddEllipse(),
-                            quali_sup=False,
-                            repel=input.IndPlotRepel()
-                        )
+                    return fviz_famd_ind(self=model,
+                                         axis=[int(input.Axis1()),int(input.Axis2())],
+                                         text_size = input.IndTextSize(),
+                                         lim_contrib =input.IndLimContrib(),
+                                         lim_cos2 = input.IndLimCos2(),
+                                         title = input.IndTitle(),
+                                         habillage= input.IndTextVarQualColor(),
+                                         add_ellipses=input.IndAddEllipse(),
+                                         quali_sup=False,
+                                         repel=input.IndPlotRepel(),
+                                         ggtheme=pn.theme_gray())
                 elif  input.IndTextColor() == "varquant":
-                    return fviz_famd_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.IndTextVarQuantColor(),
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            habillage= None,
-                            add_ellipse=input.IndAddEllipse(),
-                            quali_sup=False,
-                            repel=input.IndPlotRepel()
-                        )
+                    return fviz_famd_ind(self=model,
+                                         axis=[int(input.Axis1()),int(input.Axis2())],
+                                         color=input.IndTextVarQuantColor(),
+                                         text_size = input.IndTextSize(),
+                                         lim_contrib =input.IndLimContrib(),
+                                         lim_cos2 = input.IndLimCos2(),
+                                         title = input.IndTitle(),
+                                         habillage= None,
+                                         add_ellipses=False,
+                                         quali_sup=False,
+                                         repel=input.IndPlotRepel(),
+                                         ggtheme=pn.theme_gray())
 
             # ------------------------------------------------------------------------------
             # Individual Factor Map - PCA
@@ -1083,56 +1069,52 @@ class FAMDshiny:
             @reactive.Calc
             def ModFactorPlot():
                 if input.ModTextColor() == "actif/sup":
-                    if fa_model.quali_sup_labels_ is not None:
-                        fig = fviz_famd_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextActifColor(),
-                            color_sup=input.ModTextSupColor(),
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                    if model.quali_sup is not None:
+                        fig = fviz_famd_mod(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            title=input.ModTitle(),
+                                            color=input.ModTextActifColor(),
+                                            color_sup=input.ModTextSupColor(),
+                                            text_size=input.ModTextSize(),
+                                            lim_contrib = input.ModLimContrib(),
+                                            lim_cos2 = input.ModLimCos2(),
+                                            repel=input.ModPlotRepel(),
+                                            ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_famd_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextActifColor(),
-                            color_sup=None,
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                        fig = fviz_famd_mod(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            title=input.ModTitle(),
+                                            color=input.ModTextActifColor(),
+                                            color_sup=None,
+                                            text_size=input.ModTextSize(),
+                                            lim_contrib = input.ModLimContrib(),
+                                            lim_cos2 = input.ModLimCos2(),
+                                            repel=input.ModPlotRepel(),
+                                            ggtheme=pn.theme_gray())
                     return fig
                 elif input.ModTextColor() in ["cos2","contrib"]:
-                    if fa_model.quali_sup_labels_ is not None:
-                        fig = fviz_famd_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextColor(),
-                            color_sup=input.ModTextSupColor(),
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                    if model.quali_sup is not None:
+                        fig = fviz_famd_mod(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            title=input.ModTitle(),
+                                            color=input.ModTextColor(),
+                                            color_sup=input.ModTextSupColor(),
+                                            text_size=input.ModTextSize(),
+                                            lim_contrib = input.ModLimContrib(),
+                                            lim_cos2 = input.ModLimCos2(),
+                                            repel=input.ModPlotRepel(),
+                                            ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_famd_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextColor(),
-                            color_sup=None,
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                        fig = fviz_famd_mod(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            title=input.ModTitle(),
+                                            color=input.ModTextColor(),
+                                            color_sup=None,
+                                            text_size=input.ModTextSize(),
+                                            lim_contrib = input.ModLimContrib(),
+                                            lim_cos2 = input.ModLimCos2(),
+                                            repel=input.ModPlotRepel(),
+                                            ggtheme=pn.theme_gray())
                     return fig
                 
 
@@ -1147,51 +1129,47 @@ class FAMDshiny:
             #-------------------------------------------------------------------------------------------------
             @reactive.Calc
             def VarFactorPlot():
-                if (fa_model.quali_sup_labels_ is not None) and (fa_model.quanti_sup_labels_ is not None):
-                    return fviz_famd_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color_quali=input.VarQualActifTextColor(),
-                        color_quanti=input.VarQuantActifTextColor(),
-                        color_quali_sup=input.VarQualSupTextColor(),
-                        color_quanti_sup=input.VarQuantSupTextColor(),
-                        text_size=input.VarTextSize(),
-                        repel=input.VarPlotRepel()
-                        )
-                elif fa_model.quali_sup_labels_ is not None:
-                    return fviz_famd_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color_quali=input.VarQualActifTextColor(),
-                        color_quanti=input.VarQuantActifTextColor(),
-                        color_quali_sup=input.VarQualSupTextColor(),
-                        text_size=input.VarTextSize(),
-                        repel=input.VarPlotRepel()
-                        )
-                elif fa_model.quanti_sup_labels_ is not None:
-                    return fviz_famd_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color_quali=input.VarQualActifTextColor(),
-                        color_quanti=input.VarQuantActifTextColor(),
-                        color_quali_sup=input.VarQualSupTextColor(),
-                        color_quanti_sup=input.VarQuantSupTextColor(),
-                        text_size=input.VarTextSize(),
-                        repel=input.VarPlotRepel()
-                        )
+                if (model.quali_sup is not None) and (model.quanti_sup is not None):
+                    return fviz_famd_var(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.VarTitle(),
+                                        color_quali=input.VarQualActifTextColor(),
+                                        color_quanti=input.VarQuantActifTextColor(),
+                                        color_quali_sup=input.VarQualSupTextColor(),
+                                        color_quanti_sup=input.VarQuantSupTextColor(),
+                                        text_size=input.VarTextSize(),
+                                        repel=input.VarPlotRepel(),
+                                        ggtheme=pn.theme_gray())
+                elif model.quali_sup is not None:
+                    return fviz_famd_var(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.VarTitle(),
+                                        color_quali=input.VarQualActifTextColor(),
+                                        color_quanti=input.VarQuantActifTextColor(),
+                                        color_quali_sup=input.VarQualSupTextColor(),
+                                        text_size=input.VarTextSize(),
+                                        repel=input.VarPlotRepel(),
+                                        ggtheme=pn.theme_gray())
+                elif model.quanti_sup is not None:
+                    return fviz_famd_var(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.VarTitle(),
+                                        color_quali=input.VarQualActifTextColor(),
+                                        color_quanti=input.VarQuantActifTextColor(),
+                                        color_quali_sup=input.VarQualSupTextColor(),
+                                        color_quanti_sup=input.VarQuantSupTextColor(),
+                                        text_size=input.VarTextSize(),
+                                        repel=input.VarPlotRepel(),
+                                        ggtheme=pn.theme_gray())
                 else:
-                    return fviz_famd_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color_quali=input.VarQualActifTextColor(),
-                        color_quanti=input.VarQuantActifTextColor(),
-                        text_size=input.VarTextSize(),
-                        repel=input.VarPlotRepel()
-                        )
+                    return fviz_famd_var(self=model,
+                                        axis=[int(input.Axis1()),int(input.Axis2())],
+                                        title=input.VarTitle(),
+                                        color_quali=input.VarQualActifTextColor(),
+                                        color_quanti=input.VarQuantActifTextColor(),
+                                        text_size=input.VarTextSize(),
+                                        repel=input.VarPlotRepel(),
+                                        ggtheme=pn.theme_gray())
 
             # Variables Factor Map - MCA
             @output
@@ -1206,27 +1184,25 @@ class FAMDshiny:
             @reactive.Calc
             def VarQuantFactorPlot():
                 if input.VarQuantTextColor() == "actif/sup":
-                    if fa_model.quanti_sup_labels_ is not None:
-                        return fviz_famd_col(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.VarQuantTitle(),
-                            color=input.VarQuantActifTextColor(),
-                            color_sup=input.VarQuantSupTextColor(),
-                            text_size=input.VarQuantTextSize(),
-                            lim_contrib=input.VarQuantLimContrib(),
-                            lim_cos2=input.VarQuantLimCos2()
-                            )
+                    if model.quanti_sup is not None:
+                        return fviz_famd_col(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            title=input.VarQuantTitle(),
+                                            color=input.VarQuantActifTextColor(),
+                                            color_sup=input.VarQuantSupTextColor(),
+                                            text_size=input.VarQuantTextSize(),
+                                            lim_contrib=input.VarQuantLimContrib(),
+                                            lim_cos2=input.VarQuantLimCos2(),
+                                            ggtheme=pn.theme_gray())
                     else:
-                        return fviz_famd_col(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.VarQuantTitle(),
-                            color=input.VarQuantActifTextColor(),
-                            text_size=input.VarQuantTextSize(),
-                            lim_contrib=input.VarQuantLimContrib(),
-                            lim_cos2=input.VarQuantLimCos2()
-                            )
+                        return fviz_famd_col(self=model,
+                                            axis=[int(input.Axis1()),int(input.Axis2())],
+                                            title=input.VarQuantTitle(),
+                                            color=input.VarQuantActifTextColor(),
+                                            text_size=input.VarQuantTextSize(),
+                                            lim_contrib=input.VarQuantLimContrib(),
+                                            lim_cos2=input.VarQuantLimCos2(),
+                                            ggtheme=pn.theme_gray())
                 else:
                     return pn.ggplot()
             
@@ -1243,16 +1219,16 @@ class FAMDshiny:
             @output
             @render.plot(alt="Scree Plot - FAMD")
             def EigenPlot():
-                EigenFig = fviz_eig(self=fa_model,
+                EigenFig = fviz_eig(self=model,
                                     choice=input.EigenChoice(),
-                                    add_labels=input.EigenLabel())
+                                    add_labels=input.EigenLabel(),
+                                    ggtheme=pn.theme_gray())
                 return EigenFig.draw()
             
             # Eigen value - DataFrame
-            @output
             @render.data_frame
             def EigenTable():
-                EigenData = get_eig(fa_model).round(4).reset_index().rename(columns={"index":"dimensions"})
+                EigenData = model.eig_.round(4).reset_index().rename(columns={"index":"dimensions"})
                 EigenData.columns = [x.capitalize() for x in EigenData.columns]
                 return DataTable(data=match_datalength(EigenData,input.EigenLen()),
                                 filters=input.EigenFilter())
@@ -1265,7 +1241,8 @@ class FAMDshiny:
             @output
             @render.data_frame
             def ModCoordTable():
-                ModCoord = get_famd_mod(fa_model)["coord"].round(4).reset_index().rename(columns={"index" : "Categories"})
+                ModCoord = model.quali_var_["coord"].round(4).reset_index()
+                ModCoord.columns = ["Categories",*ModCoord.columns[1:]]
                 return DataTable(data=match_datalength(data=ModCoord,value=input.ModCoordLen()),
                                 filters=input.ModCoordFilter())
             
@@ -1274,27 +1251,26 @@ class FAMDshiny:
             @output
             @render.data_frame
             def ModContribTable():
-                ModContrib = get_famd_mod(fa_model)["contrib"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return  DataTable(data=match_datalength(data=ModContrib,value=input.ModContribLen()),
-                                filters=input.ModContribFilter())
+                ModContrib = model.quali_var_["contrib"].round(4).reset_index()
+                ModContrib.columns = ["Categories",*ModContrib.columns[1:]]
+                return  DataTable(data=match_datalength(data=ModContrib,value=input.ModContribLen()),filters=input.ModContribFilter())
             
             #-----------------------------------------------------------------------------------------------------
             # Add Variables Contributions Modal Show
             @reactive.Effect
             @reactive.event(input.ModContribGraphBtn)
             def _():
-                GraphModalShow(text="Mod",name="Contrib")
+                GraphModalShow(text="Mod",name="Contrib",max_axis=model.call_["n_components"])
             
             @reactive.Calc
             def ModContribMap():
-                return fviz_contrib(
-                    self=fa_model,
-                    choice="mod",
-                    axis=input.ModContribAxis(),
-                    top_contrib=int(input.ModContribTop()),
-                    color=input.ModContribColor(),
-                    bar_width=input.ModContribBarWidth()
-                    )
+                return fviz_contrib(self=model,
+                                    choice="quali_var",
+                                    axis=input.ModContribAxis(),
+                                    top_contrib=int(input.ModContribTop()),
+                                    color=input.ModContribColor(),
+                                    bar_width=input.ModContribBarWidth(),
+                                    ggtheme=pn.theme_gray())
 
             # Plot variables Contributions
             @output
@@ -1302,40 +1278,14 @@ class FAMDshiny:
             def ModContribPlot():
                 return ModContribMap().draw()
             
-            #----------------------------------------------------------------------------------------------------------------
-            # Add Variables/categories contributions correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.ModContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Mod",name="Contrib",title=None)
-            
-            @reactive.Calc
-            def ModContribCorrMap():
-                ModContrib = get_famd_mod(fa_model)["contrib"]
-                return fviz_corrplot(
-                    X=ModContrib,
-                    title=input.ModContribCorrTitle(),
-                    outline_color=input.ModContribCorrColor(),
-                    colors=[input.ModContribCorrLowColor(),
-                            input.ModContribCorrMidColor(),
-                            input.ModContribCorrHightColor()
-                            ]
-                    )+pn.theme_gray()
-
-            # Plot variables Contributions/correlations Map - PCA
-            @output
-            @render.plot(alt="Variables/categories contributions/correlations Map - MCA")
-            def ModContribCorrPlot():
-                return ModContribCorrMap().draw()
-            
             #-----------------------------------------------------------------------------------------------------------
             # Variables categories Cos2 
             @output
             @render.data_frame
             def ModCos2Table():
-                ModCos2 = get_famd_mod(fa_model)["cos2"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return  DataTable(data=match_datalength(data=ModCos2,value=input.ModCos2Len()),
-                                filters=input.ModCos2Filter())
+                ModCos2 = model.quali_var_["cos2"].round(4).reset_index()
+                ModCos2.columns = ["Categories",*ModCos2.columns[1:]]
+                return  DataTable(data=match_datalength(data=ModCos2,value=input.ModCos2Len()),filters=input.ModCos2Filter())
             
             #-------------------------------------------------------------------------------------------------------------
             # Add Variables Cos2 Modal Show
@@ -1346,45 +1296,19 @@ class FAMDshiny:
             
             @reactive.Calc
             def ModCos2Map():
-                return fviz_cosines(
-                    self=fa_model,
-                    choice="mod",
-                    axis=input.ModCos2Axis(),
-                    top_cos2=int(input.ModCos2Top()),
-                    color=input.ModCos2Color(),
-                    bar_width=input.ModCos2BarWidth())
+                return fviz_cos2(self=model,
+                                choice="quali_var",
+                                axis=input.ModCos2Axis(),
+                                top_cos2=int(input.ModCos2Top()),
+                                color=input.ModCos2Color(),
+                                bar_width=input.ModCos2BarWidth(),
+                                ggtheme=pn.theme_gray())
 
             # Plot variables categories Cos2
             @output
             @render.plot(alt="Variables/categories Cosines Map - FAMD")
             def ModCos2Plot():
                 return ModCos2Map().draw()
-            
-            #----------------------------------------------------------------------------------------
-            # Add Variables categories Cosinus Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.ModCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Mod",name="Cos2",title=None)
-            
-            @reactive.Calc
-            def ModCos2CorrMap():
-                ModCos2 = get_famd_mod(fa_model)["cos2"]
-                return fviz_corrplot(
-                    X=ModCos2,
-                    title=input.ModCos2CorrTitle(),
-                    outline_color=input.ModCos2CorrColor(),
-                    colors=[input.ModCos2CorrLowColor(),
-                            input.ModCos2CorrMidColor(),
-                            input.ModCos2CorrHightColor()
-                            ])+pn.theme_gray()
-
-            #--------------------------------------------------------------------------------------------------
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Variables/categories Contributions/Correlations Map - MCA")
-            def ModCos2CorrPlot():
-                return ModCos2CorrMap().draw()
             
             ########################################################################################################
             # Individuals informations
@@ -1393,63 +1317,44 @@ class FAMDshiny:
             @output
             @render.data_frame
             def IndCoordTable():
-                IndCoord = get_famd_ind(fa_model)["coord"].round(4).reset_index()
-                return DataTable(data = match_datalength(IndCoord,input.IndCoordLen()),
-                                filters=input.IndCoordFilter())
+                IndCoord = model.ind_["coord"].round(4).reset_index()
+                IndCoord.columns = ["Individus",*IndCoord.columns[1:]]
+                return DataTable(data = match_datalength(IndCoord,input.IndCoordLen()),filters=input.IndCoordFilter())
             
             # Individuals Contributions
             @output
             @render.data_frame
             def IndContribTable():
-                IndContrib = get_famd_ind(fa_model)["contrib"].round(4).reset_index()
-                return  DataTable(data=match_datalength(IndContrib,input.IndContribLen()),
-                                filters=input.IndContribFilter())
+                IndContrib = model.ind_["contrib"].round(4).reset_index()
+                IndContrib.columns = ["Individus",*IndContrib.columns[1:]]
+                return  DataTable(data=match_datalength(IndContrib,input.IndContribLen()),filters=input.IndContribFilter())
             
             # Add indiviuals Contributions Modal Show
             @reactive.Effect
             @reactive.event(input.IndContribGraphBtn)
             def _():
-                GraphModalShow(text="Ind",name="Contrib")
+                GraphModalShow(text="Ind",name="Contrib",max_axis=model.call_["n_components"])
 
             # Plot Individuals Contributions
             @output
             @render.plot(alt="Individuals Contributions Map - FAMD")
             def IndContribPlot():
-                IndContribFig = fviz_contrib(self=fa_model,
+                IndContribFig = fviz_contrib(self=model,
                                             choice="ind",
                                             axis=input.IndContribAxis(),
                                             top_contrib=int(input.IndContribTop()),
                                             color = input.IndContribColor(),
-                                            bar_width= input.IndContribBarWidth())
+                                            bar_width= input.IndContribBarWidth(),
+                                            ggtheme=pn.theme_gray())
                 return IndContribFig.draw()
-            
-            # Add Variables Contributions Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Ind",name="Contrib",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Contributions/Correlations Map - FAMD")
-            def IndContribCorrPlot():
-                IndContrib = get_famd_ind(fa_model)["contrib"]
-                IndContribCorrFig = fviz_corrplot(X=IndContrib,
-                                                title=input.IndContribCorrTitle(),
-                                                outline_color=input.IndContribCorrColor(),
-                                                colors=[input.IndContribCorrLowColor(),
-                                                        input.IndContribCorrMidColor(),
-                                                        input.IndContribCorrHightColor()
-                                                        ])+pn.theme_gray()
-                return IndContribCorrFig.draw()
             
             # Individuals Cos2 
             @output
             @render.data_frame
             def IndCos2Table():
-                IndCos2 = get_famd_ind(fa_model)["cos2"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndCos2,input.IndCos2Len()),
-                                filters=input.IndCos2Filter())
+                IndCos2 = model.ind_["cos2"].round(4).reset_index()
+                IndCos2.columns = ["Individus",*IndCos2.columns[1:]]
+                return  DataTable(data = match_datalength(IndCos2,input.IndCos2Len()),filters=input.IndCos2Filter())
             
             # Add Variables Cos2 Modal Show
             @reactive.Effect
@@ -1461,33 +1366,14 @@ class FAMDshiny:
             @output
             @render.plot(alt="Individuals Cosines Map - FAMD")
             def IndCos2Plot():
-                IndCos2Fig = fviz_cosines(self=fa_model,
-                                choice="ind",
-                                axis=input.IndCos2Axis(),
-                                top_cos2=int(input.IndCos2Top()),
-                                color=input.IndCos2Color(),
-                                bar_width=input.IndCos2BarWidth())
+                IndCos2Fig = fviz_cos2(self=model,
+                                        choice="ind",
+                                        axis=input.IndCos2Axis(),
+                                        top_cos2=int(input.IndCos2Top()),
+                                        color=input.IndCos2Color(),
+                                        bar_width=input.IndCos2BarWidth(),
+                                        ggtheme=pn.theme_gray())
                 return IndCos2Fig.draw()
-            
-            # Add Variables Cosines Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Ind",name="Cos2",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Cosinus/Correlations Map - FAMD")
-            def IndCos2CorrPlot():
-                IndCos2 = get_famd_ind(fa_model)["cos2"]
-                IndCos2CorrFig = fviz_corrplot(X=IndCos2,
-                                            title=input.IndCos2CorrTitle(),
-                                            outline_color=input.IndCos2CorrColor(),
-                                            colors=[input.IndCos2CorrLowColor(),
-                                                    input.IndCos2CorrMidColor(),
-                                                    input.IndCos2CorrHightColor()
-                                                ])+pn.theme_gray()
-                return IndCos2CorrFig.draw()
 
             ##########################################################################################
             # Conntinuous variables
@@ -1496,17 +1382,17 @@ class FAMDshiny:
             @output
             @render.data_frame
             def VarQuantCoordTable():
-                VarQuantCoord = get_famd_col(fa_model)["coord"].round(4).reset_index().rename(columns={"index":"variables"})
-                return  DataTable(data = match_datalength(VarQuantCoord,input.VarQuantCoordLen()),
-                                  filters=input.VarQuantCoordFilter())
+                VarQuantCoord = model.quanti_var_["coord"].round(4).reset_index()
+                VarQuantCoord.columns = ["Variables",*VarQuantCoord.columns[1:]]
+                return  DataTable(data = match_datalength(VarQuantCoord,input.VarQuantCoordLen()),filters=input.VarQuantCoordFilter())
             
             # Continuous variables contributions
             @output
             @render.data_frame
             def VarQuantContribTable():
-                VarQuantContrib = get_famd_col(fa_model)["contrib"].round(4).reset_index().rename(columns={"index":"variables"})
-                return  DataTable(data=match_datalength(VarQuantContrib,input.VarQuantContribLen()),
-                                filters=input.VarQuantContribFilter())
+                VarQuantContrib = model.quanti_var_["contrib"].round(4).reset_index()
+                VarQuantContrib.columns = ["Variables",*VarQuantContrib.columns[1:]]
+                return  DataTable(data=match_datalength(VarQuantContrib,input.VarQuantContribLen()),filters=input.VarQuantContribFilter())
             
             # Variables Contributions Modal Show
             @reactive.Effect
@@ -1518,41 +1404,22 @@ class FAMDshiny:
             @output
             @render.plot(alt="Quantitative variables contributions Map - FAMD")
             def VarQuantContribPlot():
-                VarQuantContribFig = fviz_contrib(self=fa_model,
-                                            choice="var",
-                                            axis=input.VarQuantContribAxis(),
-                                            top_contrib=int(input.VarQuantContribTop()),
-                                            color = input.VarQuantContribColor(),
-                                            bar_width= input.VarQuantContribBarWidth())
+                VarQuantContribFig = fviz_contrib(self=model,
+                                                  choice="quanti_var",
+                                                  axis=input.VarQuantContribAxis(),
+                                                  top_contrib=int(input.VarQuantContribTop()),
+                                                  color = input.VarQuantContribColor(),
+                                                  bar_width= input.VarQuantContribBarWidth(),
+                                                  ggtheme=pn.theme_gray())
                 return VarQuantContribFig.draw()
-            
-            # Add Variables Contributions Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarQuantContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="VarQuant",name="Contrib",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Quantitative variables Contributions/Correlations Map - FAMD")
-            def VarQuantContribCorrPlot():
-                VarQuantContrib = get_famd_col(fa_model)["contrib"]
-                VarQuantContribCorrFig = fviz_corrplot(X=VarQuantContrib,
-                                                title=input.VarQuantContribCorrTitle(),
-                                                outline_color=input.VarQuantContribCorrColor(),
-                                                colors=[input.VarQuantContribCorrLowColor(),
-                                                        input.VarQuantContribCorrMidColor(),
-                                                        input.VarQuantContribCorrHightColor()
-                                                        ])+pn.theme_gray()
-                return VarQuantContribCorrFig.draw()
             
             # Supplementary continuous variables cos2
             @output
             @render.data_frame
             def VarQuantCos2Table():
-                VarQuantCos2 = get_famd_col(fa_model)["cos2"].round(4).reset_index().rename(columns={"index":"variables"})
-                return  DataTable(data = match_datalength(VarQuantCos2,input.VarQuantCos2Len()),
-                                  filters=input.VarQuantCos2Filter())
+                VarQuantCos2 = model.quanti_var_["cos2"].round(4).reset_index()
+                VarQuantCos2.columns = ["Variables",*VarQuantCos2.columns[1:]]
+                return  DataTable(data = match_datalength(VarQuantCos2,input.VarQuantCos2Len()),filters=input.VarQuantCos2Filter())
             
             # Variables Contributions Modal Show
             @reactive.Effect
@@ -1564,35 +1431,14 @@ class FAMDshiny:
             @output
             @render.plot(alt="Quantitative variables cosinus Map - FAMD")
             def VarQuantCos2Plot():
-                VarQuantCos2Fig = fviz_cosines(
-                    self=fa_model,
-                    choice="var",
-                    axis=input.VarQuantCos2Axis(),
-                    top_cos2=int(input.VarQuantCos2Top()),
-                    color = input.VarQuantCos2Color(),
-                    bar_width= input.VarQuantCos2BarWidth())
+                VarQuantCos2Fig = fviz_cos2(self=model,
+                                            choice="quanti_var",
+                                            axis=input.VarQuantCos2Axis(),
+                                            top_cos2=int(input.VarQuantCos2Top()),
+                                            color = input.VarQuantCos2Color(),
+                                            bar_width= input.VarQuantCos2BarWidth(),
+                                            ggtheme=pn.theme_gray())
                 return VarQuantCos2Fig.draw()
-            
-            # Add Variables Cosinus Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarQuantCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="VarQuant",name="Cos2",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Quantitative variables Cosinus/Correlations Map - FAMD")
-            def VarQuantCos2CorrPlot():
-                VarQuantCos2 = get_famd_col(fa_model)["cos2"]
-                VarQuantCos2CorrFig = fviz_corrplot(
-                    X=VarQuantCos2,
-                    title=input.VarQuantCos2CorrTitle(),
-                    outline_color=input.VarQuantCos2CorrColor(),
-                    colors=[input.VarQuantCos2CorrLowColor(),
-                            input.VarQuantCos2CorrMidColor(),
-                            input.VarQuantCos2CorrHightColor()
-                            ])+pn.theme_gray()
-                return VarQuantCos2CorrFig.draw()
             
             ############################################################################################
             #   Categorical Variables informations
@@ -1601,25 +1447,25 @@ class FAMDshiny:
             @output
             @render.data_frame
             def VarQualEta2Table():
-                VarQualEta2 = get_famd_var(fa_model)["eta2"].round(4).reset_index()
-                return DataTable(data = match_datalength(VarQualEta2,input.VarQualEta2Len()),
-                                 filters=input.VarQualEta2Filter())
+                VarQualEta2 = model.var_["coord"].drop(index=model.quanti_var_["coord"].index.tolist()).round(4).reset_index()
+                VarQualEta2.columns = ["Variables",*VarQualEta2.columns[1:]]
+                return DataTable(data = match_datalength(VarQualEta2,input.VarQualEta2Len()),filters=input.VarQualEta2Filter())
             
             # Categorical variables - Contributions
             @output
             @render.data_frame
             def VarQualContribTable():
-                VarQualContrib = get_famd_var(fa_model)["contrib"].round(4).reset_index()
-                return  DataTable(data=match_datalength(VarQualContrib,input.VarQualContribLen()),
-                                  filters=input.VarQualContribFilter())
+                VarQualContrib = model.var_["contrib"].drop(index=model.quanti_var_["coord"].index.tolist()).round(4).reset_index()
+                VarQualContrib.columns = ["Variables",*VarQualContrib.columns[1:]]
+                return  DataTable(data=match_datalength(VarQualContrib,input.VarQualContribLen()),filters=input.VarQualContribFilter())
             
             # Categorical variables - Cosinus
             @output
             @render.data_frame
             def VarQualCos2Table():
-                VarQualCos2 = get_famd_var(fa_model)["cos2"].round(4).reset_index()
-                return  DataTable(data=match_datalength(VarQualCos2,input.VarQualCos2Len()),
-                                  filters=input.VarQualCos2Filter())
+                VarQualCos2 = model.var_["cos2"].drop(index=model.quanti_var_["coord"].index.tolist()).round(4).reset_index()
+                VarQualCos2.columns = ["Variables",*VarQualCos2.columns[1:]]
+                return  DataTable(data=match_datalength(VarQualCos2,input.VarQualCos2Len()),filters=input.VarQualCos2Filter())
             
             ############################################################################################
             #    Supplementary individuals informations
@@ -1628,17 +1474,17 @@ class FAMDshiny:
             @output
             @render.data_frame
             def IndSupCoordTable():
-                IndSupCoord = get_famd_ind(fa_model)["ind_sup"]["coord"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndSupCoord,input.IndSupCoordLen()),
-                                  filters=input.IndSupCoordFilter())
+                IndSupCoord = model.ind_sup_["coord"].round(4).reset_index()
+                IndSupCoord.columns = ["Individus",*IndSupCoord.columns[1:]]
+                return  DataTable(data = match_datalength(IndSupCoord,input.IndSupCoordLen()),filters=input.IndSupCoordFilter())
             
             # Supplementary Individual - Cos2
             @output
             @render.data_frame
             def IndSupCos2Table():
-                IndSupCos2 = get_famd_ind(fa_model)["ind_sup"]["cos2"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndSupCos2,input.IndSupCos2Len()),
-                                  filters=input.IndSupCos2Filter())
+                IndSupCos2 = model.ind_sup_["cos2"].round(4).reset_index()
+                IndSupCos2.columns = ["Individus",*IndSupCos2.columns[1:]]
+                return  DataTable(data = match_datalength(IndSupCos2,input.IndSupCos2Len()),filters=input.IndSupCos2Filter())
             
             ##########################################################################################
             # Supplementary continuous variables
@@ -1647,17 +1493,17 @@ class FAMDshiny:
             @output
             @render.data_frame
             def VarQuantSupCoordTable():
-                VarQuantSupCoord = get_famd_col(fa_model)["quanti_sup"]["coord"].round(4).reset_index().rename(columns={"index":"variables"})
-                return  DataTable(data = match_datalength(VarQuantSupCoord,input.VarQuantSupCoordLen()),
-                                  filters=input.VarQuantSupCoordFilter())
+                VarQuantSupCoord = model.quanti_sup_["coord"].round(4).reset_index()
+                VarQuantSupCoord.columns = ["Variables",*VarQuantSupCoord.columns[1:]]
+                return  DataTable(data = match_datalength(VarQuantSupCoord,input.VarQuantSupCoordLen()),filters=input.VarQuantSupCoordFilter())
             
             # Supplementary continuous variables cos2
             @output
             @render.data_frame
             def VarQuantSupCos2Table():
-                VarQuantSupCos2 = get_famd_col(fa_model)["quanti_sup"]["cos2"].round(4).reset_index().rename(columns={"index":"variables"})
-                return  DataTable(data = match_datalength(VarQuantSupCos2,input.VarQuantSupCos2Len()),
-                                  filters=input.VarQuantSupCos2Filter())
+                VarQuantSupCos2 = model.quanti_sup_["cos2"].round(4).reset_index()
+                VarQuantSupCos2.columns = ["Variables",*VarQuantSupCos2.columns[1:]]
+                return  DataTable(data = match_datalength(VarQuantSupCos2,input.VarQuantSupCos2Len()),filters=input.VarQuantSupCos2Filter())
 
             ###########################################################################################
             # Supplementary variables categories
@@ -1667,75 +1513,27 @@ class FAMDshiny:
             @output
             @render.data_frame
             def ModSupCoordTable():
-                ModSupCoord = get_famd_mod(fa_model)["quali_sup"]["coord"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return DataTable(data=match_datalength(data=ModSupCoord,value=input.ModSupCoordLen()),
-                                 filters=input.ModSupCoordFilter())
+                ModSupCoord = model.quali_sup_["coord"].round(4).reset_index()
+                ModSupCoord.columns = ["Categories",*ModSupCoord.columns[1:]]
+                return DataTable(data=match_datalength(data=ModSupCoord,value=input.ModSupCoordLen()),filters=input.ModSupCoordFilter())
             
             #-------------------------------------------------------------------------------
             # Supplementary variables/categories Cosinus
             @output
             @render.data_frame
             def ModSupCos2Table():
-                ModSupCos2 = get_famd_mod(fa_model)["quali_sup"]["cos2"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return DataTable(data=match_datalength(data=ModSupCos2,value=input.ModSupCos2Len()),
-                                 filters=input.ModSupCos2Filter())
-            
-            #-------------------------------------------------------------------------------------------------------------
-            # Add Variables Cos2 Modal Show
-            @reactive.Effect
-            @reactive.event(input.ModSupCos2GraphBtn)
-            def _():
-                GraphModalShow(text="ModSup",name="Cos2")
-            
-            @reactive.Calc
-            def ModSupCos2Map():
-                return fviz_cosines(
-                    self=fa_model,
-                    choice="quali_sup",
-                    axis=input.ModSupCos2Axis(),
-                    top_cos2=int(input.ModSupCos2Top()),
-                    color=input.ModSupCos2Color(),
-                    bar_width=input.ModSupCos2BarWidth())
-
-            # Plot variables categories Cos2
-            @output
-            @render.plot(alt="Supplementary variables/categories Cosines Map - FAMD")
-            def ModSupCos2Plot():
-                return ModSupCos2Map().draw()
-            
-            #----------------------------------------------------------------------------------------
-            # Add Variables categories Cosinus Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.ModSupCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="ModSup",name="Cos2",title=None)
-            
-            @reactive.Calc
-            def ModSupCos2CorrMap():
-                ModSupCos2 = get_famd_mod(fa_model)["quali_sup"]["cos2"]
-                return fviz_corrplot(
-                    X=ModSupCos2,
-                    title=input.ModSupCos2CorrTitle(),
-                    outline_color=input.ModSupCos2CorrColor(),
-                    colors=[input.ModSupCos2CorrLowColor(),
-                            input.ModSupCos2CorrMidColor(),
-                            input.ModSupCos2CorrHightColor()
-                            ])+pn.theme_gray()
-
-            # Plot variables cos2
-            @output
-            @render.plot(alt="Supplementary variables/categories cos2/Correlations Map - MCA")
-            def ModSupCos2CorrPlot():
-                return ModSupCos2CorrMap().draw()
+                ModSupCos2 = model.quali_sup_["cos2"].round(4).reset_index()
+                ModSupCos2.columns = ["Categories",*ModSupCos2.columns[1:]]
+                return DataTable(data=match_datalength(data=ModSupCos2,value=input.ModSupCos2Len()),filters=input.ModSupCos2Filter())
             
             #-------------------------------------------------------------------------------
             # Supplementary variables/categories Vtest
             @output
             @render.data_frame
             def ModSupVtestTable():
-                ModSupVtest = get_famd_mod(fa_model)["quali_sup"]["vtest"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return DataTable(data=match_datalength(data=ModSupVtest,value=input.ModSupVtestLen()),
-                                 filters=input.ModSupVtestFilter())
+                ModSupVtest = model.quali_sup_["vtest"].round(4).reset_index()
+                ModSupVtest.columns = ["Categories",*ModSupVtest.columns[1:]]
+                return DataTable(data=match_datalength(data=ModSupVtest,value=input.ModSupVtestLen()),filters=input.ModSupVtestFilter())
             
             ############################################################################################
             #   Supplementary Categorical Variables informations
@@ -1744,17 +1542,17 @@ class FAMDshiny:
             @output
             @render.data_frame
             def VarQualSupEta2Table():
-                VarQualSupEta2 = get_famd_var(fa_model)["quali_sup"]["eta2"].round(4).reset_index()
-                return DataTable(data = match_datalength(VarQualSupEta2,input.VarQualSupEta2Len()),
-                                 filters=input.VarQualSupEta2Filter())
+                VarQualSupEta2 = model.quali_sup_["eta2"].round(4).reset_index()
+                VarQualSupEta2.columns = ["Variables",*VarQualSupEta2.columns[1:]]
+                return DataTable(data = match_datalength(VarQualSupEta2,input.VarQualSupEta2Len()),filters=input.VarQualSupEta2Filter())
             
             # Supplementary Categorical variables - Cosinus
             @output
             @render.data_frame
             def VarQualSupCos2Table():
-                VarQualSupCos2 = get_famd_var(fa_model)["quali_sup"]["cos2"].round(4).reset_index()
-                return  DataTable(data=match_datalength(VarQualSupCos2,input.VarQualSupCos2Len()),
-                                  filters=input.VarQualSupCos2Filter())
+                VarQualSupCos2 = model.quali_sup_["cos2"].round(4).reset_index()
+                VarQualSupCos2.columns = ["Variables",*VarQualSupCos2.columns[1:]]
+                return  DataTable(data=match_datalength(VarQualSupCos2,input.VarQualSupCos2Len()),filters=input.VarQualSupCos2Filter())
             
             ############################################################################################
             #    Tab : Description automatique des axes
@@ -1763,100 +1561,98 @@ class FAMDshiny:
             @output
             @render.data_frame
             def Dim1DescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None,proba=input.pvalueDimdesc())
+                DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescQuanti = DimDesc[input.Dimdesc()]["quanti"].reset_index().rename(columns={"index":"Variables"})
                 elif isinstance(DimDesc[input.Dimdesc()],pd.DataFrame):
                     DimDescQuanti = DimDesc[input.Dimdesc()].reset_index().rename(columns={"index":"Variables"})
                 else:
                     DimDescQuanti = pd.DataFrame()
-                return  DataTable(data = match_datalength(DimDescQuanti,input.Dim1DescLen()),
-                                filters=input.Dim1DescFilter())
+                return  DataTable(data = match_datalength(DimDescQuanti,input.Dim1DescLen()),filters=input.Dim1DescFilter())
             
             #--------------------------------------------------------------------------------------------------
             @output
             @render.data_frame
             def Dim2DescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None,proba=input.pvalueDimdesc())
+                DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescQuali = DimDesc[input.Dimdesc()]["quali"].reset_index().rename(columns={"index":"Variables"})
                 elif isinstance(DimDesc[input.Dimdesc()],pd.DataFrame):
                     DimDescQuali = DimDesc[input.Dimdesc()].reset_index().rename(columns={"index":"Variables"})
                 else:
                     DimDescQuali = pd.DataFrame()
-                return  DataTable(data = match_datalength(DimDescQuali,input.Dim2DescLen()),
-                                  filters=input.Dim2DescFilter())
+                return  DataTable(data = match_datalength(DimDescQuali,input.Dim2DescLen()),filters=input.Dim2DescFilter())
             
             ###########################################################################################
             #   Tab : Resumé du jeu de données
             ###########################################################################################
             #-----------------------------------------------------------------------------------------------
             ### Statistiques descriptives
-            @output
-            @render.data_frame
-            def StatsDescTable():
-                data = fa_model.active_data_[fa_model.quanti_labels_]
-                if fa_model.quanti_sup_labels_ is not None:
-                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
-                    data = pd.concat([data,quanti_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
+            # @output
+            # @render.data_frame
+            # def StatsDescTable():
+            #     data = model.active_data_[fa_model.quanti_labels_]
+            #     if fa_model.quanti_sup_labels_ is not None:
+            #         quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+            #         data = pd.concat([data,quanti_sup],axis=1)
+            #         if fa_model.row_sup_labels_ is not None:
+            #             data = data.drop(index=fa_model.row_sup_labels_)
 
-                StatsDesc = data.describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
-                return  DataTable(data = match_datalength(StatsDesc,input.StatsDescLen()),
-                                filters=input.StatsDescFilter())
+            #     StatsDesc = data.describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
+            #     return  DataTable(data = match_datalength(StatsDesc,input.StatsDescLen()),
+            #                     filters=input.StatsDescFilter())
             
             # Histogramme
-            @output
-            @render.plot(alt="Hist - Plot")
-            def VarHistGraph():
-                data = fa_model.active_data_[fa_model.quanti_labels_]
-                if fa_model.quanti_sup_labels_ is not None:
-                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
-                    data = pd.concat([data,quanti_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
-                # Initialise
-                p = pn.ggplot(data,pn.aes(x=input.VarQuantLabel()))
-                # Add density
-                if input.AddDensity():
-                    p = (p + pn.geom_histogram(pn.aes(y="..density.."), color="darkblue", fill="lightblue")+
-                        pn.geom_density(alpha=.2, fill="#FF6666"))
-                else:
-                    p = p + pn.geom_histogram(color="darkblue", fill="lightblue")
+            # @output
+            # @render.plot(alt="Hist - Plot")
+            # def VarHistGraph():
+            #     data = fa_model.active_data_[fa_model.quanti_labels_]
+            #     if fa_model.quanti_sup_labels_ is not None:
+            #         quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+            #         data = pd.concat([data,quanti_sup],axis=1)
+            #         if fa_model.row_sup_labels_ is not None:
+            #             data = data.drop(index=fa_model.row_sup_labels_)
+            #     # Initialise
+            #     p = pn.ggplot(data,pn.aes(x=input.VarQuantLabel()))
+            #     # Add density
+            #     if input.AddDensity():
+            #         p = (p + pn.geom_histogram(pn.aes(y="..density.."), color="darkblue", fill="lightblue")+
+            #             pn.geom_density(alpha=.2, fill="#FF6666"))
+            #     else:
+            #         p = p + pn.geom_histogram(color="darkblue", fill="lightblue")
                 
-                p = p + pn.ggtitle(f"Histogram de {input.VarQuantLabel()}")
+            #     p = p + pn.ggtitle(f"Histogram de {input.VarQuantLabel()}")
 
-                return p.draw()
+            #     return p.draw()
 
             # Matrice des corrélations
-            @output
-            @render.data_frame
-            def CorrMatrixTable():
-                data = fa_model.active_data_[fa_model.quanti_labels_]
-                if fa_model.quanti_sup_labels_ is not None:
-                    quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
-                    data = pd.concat([data,quanti_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
+            # @output
+            # @render.data_frame
+            # def CorrMatrixTable():
+            #     data = fa_model.active_data_[fa_model.quanti_labels_]
+            #     if fa_model.quanti_sup_labels_ is not None:
+            #         quanti_sup = fa_model.data_[fa_model.quanti_sup_labels_]
+            #         data = pd.concat([data,quanti_sup],axis=1)
+            #         if fa_model.row_sup_labels_ is not None:
+            #             data = data.drop(index=fa_model.row_sup_labels_)
                 
-                corr_mat = data.corr(method="pearson").round(4).reset_index().rename(columns={"index":"Variables"})
-                return DataTable(data = match_datalength(corr_mat,input.CorrMatrixLen()),
-                                filters=input.CorrMatrixFilter())
+            #     corr_mat = data.corr(method="pearson").round(4).reset_index().rename(columns={"index":"Variables"})
+            #     return DataTable(data = match_datalength(corr_mat,input.CorrMatrixLen()),
+            #                     filters=input.CorrMatrixFilter())
 
             #---------------------------------------------------------------------------------------------
             # Diagramme en barres
-            @output
-            @render.plot(alt="Bar-Plot")
-            def VarBarPlotGraph():
-                data = fa_model.active_data_[fa_model.quali_labels_]
-                if fa_model.quali_sup_labels_ is not None:
-                    quali_sup = fa_model.data_[fa_model.quali_sup_labels_]
-                    data = pd.concat([data,quali_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
-                p = pn.ggplot(data,pn.aes(x=input.VarQualLabel()))+ pn.geom_bar(color="darkblue", fill="lightblue")
-                return p.draw()
+            # @output
+            # @render.plot(alt="Bar-Plot")
+            # def VarBarPlotGraph():
+            #     data = fa_model.active_data_[fa_model.quali_labels_]
+            #     if fa_model.quali_sup_labels_ is not None:
+            #         quali_sup = fa_model.data_[fa_model.quali_sup_labels_]
+            #         data = pd.concat([data,quali_sup],axis=1)
+            #         if fa_model.row_sup_labels_ is not None:
+            #             data = data.drop(index=fa_model.row_sup_labels_)
+            #     p = pn.ggplot(data,pn.aes(x=input.VarQualLabel()))+ pn.geom_bar(color="darkblue", fill="lightblue")
+            #     return p.draw()
             
             ##############################################################################################
             # Tab : Data
@@ -1866,9 +1662,8 @@ class FAMDshiny:
             @output
             @render.data_frame
             def OverallDataTable():
-                overalldata = fa_model.data_.reset_index()
-                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),
-                                filters=input.OverallDataFilter())
+                overalldata = model.call_["Xtot"].reset_index()
+                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),filters=input.OverallDataFilter())
             
             ###########################################################
             # Exit

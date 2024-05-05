@@ -2,6 +2,8 @@
 from shiny import App, Inputs, Outputs, Session, render, ui, reactive
 import shinyswatch
 from pathlib import Path
+import numpy as np
+import scipy as sp
 import pandas as pd
 import plotnine as pn
 import matplotlib.colors as mcolors
@@ -9,23 +11,9 @@ import nest_asyncio
 import uvicorn
 
 #  All scientisttools fonctions
-from scientisttools.ggplot import (
-    fviz_mca_ind,
-    fviz_mca_mod,
-    fviz_mca_var,
-    fviz_eig, 
-    fviz_contrib,
-    fviz_cosines,
-    fviz_corrplot,
-    fviz_corrcircle)
-from scientisttools.extractfactor import (
-    get_eig,
-    get_mca_ind,
-    get_mca_var,
-    get_mca_mod,
-    dimdesc)
+from scientisttools import fviz_mca_ind,fviz_mca_mod,fviz_mca_var,fviz_eig, fviz_contrib,fviz_cos2,fviz_corrplot,fviz_corrcircle, dimdesc
 
-from scientistshiny.function import *
+from .function import *
 
 colors = mcolors.CSS4_COLORS
 colors["cos2"] = "cos2"
@@ -36,6 +24,7 @@ css_path = Path(__file__).parent / "www" / "style.css"
 class MCAshiny:
     """
     Multiple Correspondance Analysis (MCA) with scientistshiny
+    ----------------------------------------------------------
 
     Description
     -----------
@@ -48,29 +37,33 @@ class MCAshiny:
 
     Parameters:
     ----------
-    fa_model : An instance of class MCA. A MCA result from scientisttools.
+    model : An instance of class MCA. A MCA result from scientisttools.
 
     Returns:
     -------
     Graphs : a tab containing the individuals factor map and the variables factor map
+
     Values : a tab containing the summary of the MCA performed, the eigenvalue, the results
              for the variables, the results for the individuals, the results for the supplementary
              variables and the results for the categorical variables.
+
     Automatic description of axes : a tab containing the output of the dimdesc function. This function is designed to 
                                     point out the variables and the categories that are the most characteristic according
                                     to each dimension obtained by a Factor Analysis.
+
     Summary of dataset : A tab containing the summary of the dataset and a boxplot and histogramm for quantitative variables.
+
     Data : a tab containing the dataset with a nice display.
 
     The left part of the application allows to change some elements of the graphs (axes, variables, colors,.)
 
     Author:
     -------
-    Duvérier DJIFACK ZEBAZE : duverierdjifack@gmail.com
+    Duvérier DJIFACK ZEBAZE duverierdjifack@gmail.com
 
     Examples:
     ---------
-    > from scientisttools.decomposition import MCA
+    > from scientisttools import MCA
     > from scientistshiny import MCAshiny
 
 
@@ -79,9 +72,10 @@ class MCAshiny:
     """
 
 
-    def __init__(self,fa_model=None):
-        if fa_model.model_ != "mca":
-            raise ValueError("Error : 'fa_model' must be an instance of class MCA")
+    def __init__(self,model=None):
+        # Check if model is Multiple Correspondence Analysis (CA)
+        if model.model_ != "mca":
+            raise TypeError("'model' must be an instance of class MCA")
         
         # -----------------------------------------------------------------------------------
         # Initialise value choice
@@ -89,30 +83,35 @@ class MCAshiny:
                         "ModRes"   : "Résultats des modalités",
                         "IndRes"   : "Résultats sur les individus",
                         "VarRes"   : "Résultats sur les variables"}
-        if fa_model.row_sup_labels_ is not None:
-            value_choice.update({"IndSupRes" : "Résultats des individus supplémentaires"})
-        if fa_model.quanti_sup_labels_ is not None:
-            value_choice.update({"VarQuantRes" : "Résultats des variables quantitatives supplémentaires"})
-        if fa_model.quali_sup_labels_ is not None:
-            value_choice.update({"VarSupRes" : "Résultats des variables qualitatives supplémentaires"})
+        
+        # Check if supplementary individuals
+        if hasattr(model,"row_sup_"):
+            value_choice = {**value_choice,**{"IndSupRes" : "Résultats des individus supplémentaires"}}
+
+        # Check if supplementary quantitatives variables
+        if hasattr(model,"quanti_sup_"):
+            value_choice = {**value_choice, **{"VarQuantRes" : "Résultats des variables quantitatives supplémentaires"}}
+
+        # Check if supplementary qualitatives variables
+        if hasattr(model,"quali_sup_"):
+            value_choice = {**value_choice,**{"VarSupRes" : "Résultats des variables qualitatives supplémentaires"}}
         
         # Plot Choice
         PlotChoice = {"IndPlot":"individus",
                       "ModPlot":"modalités",
                       "VarPlot":"Variables"}
-        if fa_model.quanti_sup_labels_ is not None:
-            PlotChoice.update({"VarQuantPlot" : "Variables quantitatives"})
+        if hasattr(model,"quanti_sup_"):
+            PlotChoice = {**PlotChoice,**{"VarQuantPlot" : "Variables quantitatives"}}
         
         # Dim Desc Choice
         DimDescChoice = {}
-        for i in range(min(3,fa_model.n_components_)):
+        for i in range(min(3,model.call_["n_components"])):
             DimDescChoice.update({"Dim."+str(i+1) : "Dimension "+str(i+1)})
         
         # Add Supplementary Qualitatives Variables
-        VarLabelChoice = list(fa_model.original_data_.columns)
-        if fa_model.quali_sup_labels_ is not None:
-            for i in range(len(fa_model.quali_sup_labels_)):
-                VarLabelChoice.insert(len(VarLabelChoice)+1,fa_model.quali_sup_labels_[i])
+        VarLabelChoice = model.call_["X"].columns.tolist()
+        if hasattr(model,"quali_sup_"):
+            VarLabelChoice = [*VarLabelChoice,*model.quali_sup_["eta2"].index.tolist()]
 
         # UI
         app_ui = ui.page_fluid(
@@ -131,7 +130,7 @@ class MCAshiny:
                         ui.input_select(
                             id="Axis1",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=0,
                             multiple=False
                         ),
@@ -141,7 +140,7 @@ class MCAshiny:
                         ui.input_select(
                             id="Axis2",
                             label="",
-                            choices={x:x for x in range(fa_model.n_components_)},
+                            choices={x:x for x in range(model.call_["n_components"])},
                             selected=1,
                             multiple=False
                         ),
@@ -329,20 +328,6 @@ class MCAshiny:
                             step=2,
                             ticks=False
                         ),
-                        ui.input_select(
-                            id="VarPointSelect",
-                            label="Libellés des points pour",
-                            choices={
-                                "none"    : "Pas de sélection",
-                                "cos2"    : "Cosinus"
-                                },
-                            selected="none",
-                            multiple=False,
-                            width="100%"
-                        ),
-                        ui.panel_conditional("input.VarPointSelect === 'cos2'",
-                            ui.div(ui.input_slider(id="VarLimCos2", label = "Libellés pour un cos2 plus grand que",min = 0, max = 1,value=0,step=0.05),align="center")              
-                        ),
                         ui.output_ui("VarPlotColorChoice"),
                         ui.input_switch(
                             id="VarPlotRepel",
@@ -362,7 +347,7 @@ class MCAshiny:
                     width="25%"
                 ),
                 ui.navset_card_tab(
-                    ui.nav("Graphes",
+                    ui.nav_panel("Graphes",
                         ui.row(
                             ui.column(6,
                                 ui.div(ui.output_plot("RowFactorMap",width='100%', height='500px'),align="center"),
@@ -400,7 +385,7 @@ class MCAshiny:
                             )
                         ),
                     ),
-                    ui.nav("Valeurs",
+                    ui.nav_panel("Valeurs",
                         ui.input_radio_buttons(id="choice",label=ui.h6("Quelles sorties voulez-vous?"),choices=value_choice,inline=True),
                         ui.panel_conditional("input.choice ==='EigenRes'",
                             ui.br(),
@@ -421,21 +406,21 @@ class MCAshiny:
                             ui.h5("Rapport de corrélation"),
                             PanelConditional1(text="Var",name="Eta2"),
                             ui.hr(),
-                            ui.h5("Cos2 - Qualité de la représentation"),
-                            PanelConditional1(text="Var",name="Cos2")
+                            ui.h5("Contributions"),
+                            PanelConditional1(text="Var",name="Contrib")
                         ),
                         ui.output_ui("IndSupPanel"),
                         ui.output_ui("VarSupPanel"),  
                         ui.output_ui("VarQuantPanel")
                     ),
-                    ui.nav("Description automatique des axes",
+                    ui.nav_panel("Description automatique des axes",
                         ui.row(
                             ui.column(7,ui.input_radio_buttons(id="pvalueDimdesc",label="Probabilité critique",choices={x:y for x,y in zip([0.01,0.05,0.1,1.0],["Significance level 1%","Significance level 5%","Significance level 10%","None"])},selected=0.05,width="100%",inline=True)),
                             ui.column(5,ui.input_radio_buttons(id="Dimdesc",label="Choisir les dimensions",choices=DimDescChoice,selected="Dim.1",inline=True))
                         ),
                         ui.output_ui(id="DimDesc")
                     ),
-                    ui.nav("Résumé du jeu de données",
+                    ui.nav_panel("Résumé du jeu de données",
                         ui.input_radio_buttons(
                             id="ResumeChoice",
                             label=ui.h6("Quelles sorties voulez - vous?"),
@@ -446,8 +431,13 @@ class MCAshiny:
                             selected="StatsDesc",
                             width="100%",
                             inline=True),
+                            ui.br(),
                         ui.panel_conditional("input.ResumeChoice==='StatsDesc'",
-                            PanelConditional1(text="StatsDesc",name="")
+                            ui.h5("Test du Chi2"),
+                            PanelConditional1(text="Chi2",name="Test"),
+                            ui.hr(),
+                            ui.h5("Autres mesures d'association"),
+                            PanelConditional1(text="Others",name="Test")
                         ),
                         ui.panel_conditional("input.ResumeChoice === 'BarPlot'",
                             ui.row(
@@ -458,9 +448,8 @@ class MCAshiny:
                             )
                         )
                     ),
-                    ui.nav("Données",
+                    ui.nav_panel("Données",
                         PanelConditional1(text="OverallData",name="")
-                        
                     )
                 )
             )
@@ -474,7 +463,7 @@ class MCAshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis1())
-                Dim = [i for i in range(fa_model.n_components_) if i > x]
+                Dim = [i for i in range(model.call_["n_components"]) if i > x]
                 ui.update_select(
                     id="Axis2",
                     label="",
@@ -485,7 +474,7 @@ class MCAshiny:
             @reactive.Effect
             def _():
                 x = int(input.Axis2())
-                Dim = [i for i in range(fa_model.n_components_) if i < x]
+                Dim = [i for i in range(model.call_["n_components"]) if i < x]
                 ui.update_select(
                     id="Axis1",
                     label="",
@@ -497,7 +486,7 @@ class MCAshiny:
             @output
             @render.ui
             def IndTextChoice():
-                if fa_model.row_sup_labels_ is not None:
+                if hasattr(model,"ind_sup_"):
                     return ui.TagList(
                         ui.input_select(
                             id="IndTextActifColor",
@@ -556,13 +545,14 @@ class MCAshiny:
             @output
             @render.ui
             def IndVarQuantColorPanel():
-                if fa_model.quanti_sup_labels_ is not None:
+                if hasattr(model,"quanti_sup_"):
+                    quanti_sup_labels = model.quanti_sup_["coord"].index.tolist()
                     return ui.TagList(
                         ui.input_select(
                             id="IndTextVarQuantColor",
                             label="Choix de la variable",
-                            choices={x:x for x in fa_model.quanti_sup_labels_},
-                            selected=fa_model.quanti_sup_labels_[0],
+                            choices={x:x for x in quanti_sup_labels},
+                            selected=quanti_sup_labels[0],
                             multiple=False
                         )
                     )
@@ -576,7 +566,7 @@ class MCAshiny:
             @output
             @render.ui
             def ModTextChoice():
-                if fa_model.quali_sup_labels_ is not None:
+                if hasattr(model,"quali_sup_"):
                     return ui.TagList(
                         ui.input_select(
                             id="ModTextActifColor",
@@ -636,7 +626,7 @@ class MCAshiny:
             @output
             @render.ui
             def VarPlotColorChoice():
-                if fa_model.quali_sup_labels_ is not None and fa_model.quanti_sup_labels_ is not None:
+                if model.quali_sup is not None and model.quanti_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="VarTextActifColor",
@@ -663,7 +653,7 @@ class MCAshiny:
                             width="100%"
                         )
                     )
-                elif fa_model.quali_sup_labels_ is not None:
+                elif model.quali_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="VarTextActifColor",
@@ -682,7 +672,7 @@ class MCAshiny:
                             width="100%"
                         )
                     )
-                elif fa_model.quanti_sup_labels_ is not None:
+                elif model.quanti_sup is not None:
                     return ui.TagList(
                         ui.input_select(
                             id="VarTextActifColor",
@@ -755,7 +745,7 @@ class MCAshiny:
             @output
             @render.ui
             def VarQuantOutPut():
-                if fa_model.quanti_sup_labels_ is not None:
+                if model.quanti_sup is not None:
                     return ui.TagList(
                         ui.div(ui.output_plot("VarQuantFactorMap",width='100%', height='500px'),align="center"),
                         ui.hr(),
@@ -802,7 +792,7 @@ class MCAshiny:
                             PanelConditional1(text="IndSup",name="Coord"),
                             ui.hr(),
                             ui.h5("Cos2 - Qualité de la représentation"),
-                            PanelConditional2(text="IndSup",name="Cos2") 
+                            PanelConditional1(text="IndSup",name="Cos2") 
                         )
             
             # Add Variables/categories Supplementary Conditional Panel
@@ -815,7 +805,10 @@ class MCAshiny:
                             PanelConditional1(text="VarSup",name="Coord"),
                             ui.hr(),
                             ui.h5("Cos2 - Qualité de la représentation"),
-                            PanelConditional2(text="VarSup",name="Cos2")
+                            PanelConditional1(text="VarSup",name="Cos2"),
+                            ui.hr(),
+                            ui.h5("Vtest"),
+                            PanelConditional1(text="VarSup",name="Vtest")
                         )
             
             # Add Continuous Supplementary Conditional Panel
@@ -842,66 +835,61 @@ class MCAshiny:
             @reactive.Calc
             def RowPlot():
                 if input.IndTextColor() == "actif/sup":
-                    if fa_model.row_sup_labels_ is not None:
-                        fig = fviz_mca_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.IndTextActifColor(),
-                            color_sup = input.IndTextSupColor(),
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            repel=input.IndPlotRepel()
-                        )
+                    if model.ind_sup is not None:
+                        fig = fviz_mca_ind(self=model,
+                                           axis=[int(input.Axis1()),int(input.Axis2())],
+                                           color=input.IndTextActifColor(),
+                                           color_sup = input.IndTextSupColor(),
+                                           text_size = input.IndTextSize(),
+                                           lim_contrib =input.IndLimContrib(),
+                                           lim_cos2 = input.IndLimCos2(),
+                                           title = input.IndTitle(),
+                                           repel=input.IndPlotRepel(),
+                                           ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_mca_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.IndTextActifColor(),
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            repel=input.IndPlotRepel()
-                        )
+                        fig = fviz_mca_ind(self=model,
+                                           axis=[int(input.Axis1()),int(input.Axis2())],
+                                           color=input.IndTextActifColor(),
+                                           text_size = input.IndTextSize(),
+                                           lim_contrib =input.IndLimContrib(),
+                                           lim_cos2 = input.IndLimCos2(),
+                                           title = input.IndTitle(),
+                                           repel=input.IndPlotRepel(),
+                                           ggtheme=pn.theme_gray())
                 elif input.IndTextColor() in ["cos2","contrib"]:
-                    fig = fviz_mca_ind(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        color=input.IndTextColor(),
-                        text_size = input.IndTextSize(),
-                        lim_contrib =input.IndLimContrib(),
-                        lim_cos2 = input.IndLimCos2(),
-                        title = input.IndTitle(),
-                        repel=input.IndPlotRepel()
-                    )
+                    fig = fviz_mca_ind(self=model,
+                                       axis=[int(input.Axis1()),int(input.Axis2())],
+                                       color=input.IndTextColor(),
+                                       text_size = input.IndTextSize(),
+                                       lim_contrib =input.IndLimContrib(),
+                                       lim_cos2 = input.IndLimCos2(),
+                                       title = input.IndTitle(),
+                                       repel=input.IndPlotRepel(),
+                                       ggtheme=pn.theme_gray())
                 elif input.IndTextColor() == "varqual":
-                    fig = fviz_mca_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            habillage= input.IndTextVarQualColor(),
-                            add_ellipse=input.IndAddEllipse(),
-                            repel=input.IndPlotRepel()
-                        )
+                    fig = fviz_mca_ind(self=model,
+                                       axis=[int(input.Axis1()),int(input.Axis2())],
+                                       text_size = input.IndTextSize(),
+                                       lim_contrib =input.IndLimContrib(),
+                                       lim_cos2 = input.IndLimCos2(),
+                                       title = input.IndTitle(),
+                                       habillage= input.IndTextVarQualColor(),
+                                       add_ellipses=input.IndAddEllipse(),
+                                       repel=input.IndPlotRepel(),
+                                       ggtheme=pn.theme_gray())
                 elif  input.IndTextColor() == "varquant":
-                    if fa_model.quanti_sup_labels_ is not None:
-                        fig = fviz_mca_ind(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            color=input.IndTextVarQuantColor(),
-                            text_size = input.IndTextSize(),
-                            lim_contrib =input.IndLimContrib(),
-                            lim_cos2 = input.IndLimCos2(),
-                            title = input.IndTitle(),
-                            habillage= None,
-                            add_ellipse=input.IndAddEllipse(),
-                            repel=input.IndPlotRepel()
-                        )
+                    if model.quanti_sup is not None:
+                        fig = fviz_mca_ind(self=model,
+                                           axis=[int(input.Axis1()),int(input.Axis2())],
+                                           color=input.IndTextVarQuantColor(),
+                                           text_size = input.IndTextSize(),
+                                           lim_contrib =input.IndLimContrib(),
+                                           lim_cos2 = input.IndLimCos2(),
+                                           title = input.IndTitle(),
+                                           habillage= None,
+                                           add_ellipses=input.IndAddEllipse(),
+                                           repel=input.IndPlotRepel(),
+                                           ggtheme=pn.theme_gray())
                     else:
                         fig = pn.ggplot()
 
@@ -931,55 +919,51 @@ class MCAshiny:
             @reactive.Calc
             def ModFactorPlot():
                 if input.ModTextColor() == "actif/sup":
-                    if fa_model.quali_sup_labels_ is not None:
-                        fig = fviz_mca_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextActifColor(),
-                            color_sup=input.ModTextSupColor(),
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                    if model.quali_sup is not None:
+                        fig = fviz_mca_mod(self=model,
+                                           axis=[int(input.Axis1()),int(input.Axis2())],
+                                           title=input.ModTitle(),
+                                           color=input.ModTextActifColor(),
+                                           color_sup=input.ModTextSupColor(),
+                                           text_size=input.ModTextSize(),
+                                           lim_contrib = input.ModLimContrib(),
+                                           lim_cos2 = input.ModLimCos2(),
+                                           repel=input.ModPlotRepel(),
+                                           ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_mca_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextActifColor(),
-                            color_sup=None,
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                        fig = fviz_mca_mod(self=model,
+                                           axis=[int(input.Axis1()),int(input.Axis2())],
+                                           title=input.ModTitle(),
+                                           color=input.ModTextActifColor(),
+                                           color_sup=None,
+                                           text_size=input.ModTextSize(),
+                                           lim_contrib = input.ModLimContrib(),
+                                           lim_cos2 = input.ModLimCos2(),
+                                           repel=input.ModPlotRepel(),
+                                           ggtheme=pn.theme_gray())
                 elif input.ModTextColor() in ["cos2","contrib"]:
-                    if fa_model.quali_sup_labels_ is not None:
-                        fig = fviz_mca_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextColor(),
-                            color_sup=input.ModTextSupColor(),
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                    if model.quali_sup is not None:
+                        fig = fviz_mca_mod(self=model,
+                                           axis=[int(input.Axis1()),int(input.Axis2())],
+                                           title=input.ModTitle(),
+                                           color=input.ModTextColor(),
+                                           color_sup=input.ModTextSupColor(),
+                                           text_size=input.ModTextSize(),
+                                           lim_contrib = input.ModLimContrib(),
+                                           lim_cos2 = input.ModLimCos2(),
+                                           repel=input.ModPlotRepel(),
+                                           ggtheme=pn.theme_gray())
                     else:
-                        fig = fviz_mca_mod(
-                            self=fa_model,
-                            axis=[int(input.Axis1()),int(input.Axis2())],
-                            title=input.ModTitle(),
-                            color=input.ModTextColor(),
-                            color_sup=None,
-                            text_size=input.ModTextSize(),
-                            lim_contrib = input.ModLimContrib(),
-                            lim_cos2 = input.ModLimCos2(),
-                            repel=input.ModPlotRepel()
-                            )
+                        fig = fviz_mca_mod(self=model,
+                                           axis=[int(input.Axis1()),int(input.Axis2())],
+                                           title=input.ModTitle(),
+                                           color=input.ModTextColor(),
+                                           color_sup=None,
+                                           text_size=input.ModTextSize(),
+                                           lim_contrib = input.ModLimContrib(),
+                                           lim_cos2 = input.ModLimCos2(),
+                                           repel=input.ModPlotRepel(),
+                                           ggtheme=pn.theme_gray())
                 return fig
 
             # Variables categories Factor Map - MCA
@@ -993,50 +977,42 @@ class MCAshiny:
             #-------------------------------------------------------------------------------------------------
             @reactive.Calc
             def VarFactorPlot():
-                if (fa_model.quali_sup_labels_ is not None) and (fa_model.quanti_sup_labels_ is not None):
-                    fig = fviz_mca_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color=input.VarTextActifColor(),
-                        color_sup=input.VarSupTextSupColor(),
-                        color_quanti_sup=input.VarQuantTextColor(),
-                        text_size=input.VarTextSize(),
-                        lim_cos2 = input.VarLimCos2(),
-                        repel=input.VarPlotRepel()
-                        )
-                elif fa_model.quali_sup_labels_ is not None:
-                    fig = fviz_mca_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color=input.VarTextActifColor(),
-                        color_sup=input.VarSupTextSupColor(),
-                        text_size=input.VarTextSize(),
-                        lim_cos2 = input.VarLimCos2(),
-                        repel=input.VarPlotRepel()
-                        )
-                elif fa_model.quanti_sup_labels_ is not None:
-                    fig = fviz_mca_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color=input.VarTextActifColor(),
-                        color_quanti_sup=input.VarQuantTextColor(),
-                        text_size=input.VarTextSize(),
-                        lim_cos2 = input.VarLimCos2(),
-                        repel=input.VarPlotRepel()
-                        )
+                if (model.quali_sup is not None) and (model.quanti_sup is not None):
+                    fig = fviz_mca_var(self=model,
+                                       axis=[int(input.Axis1()),int(input.Axis2())],
+                                       title=input.VarTitle(),
+                                       color=input.VarTextActifColor(),
+                                       color_sup=input.VarSupTextSupColor(),
+                                       color_quanti_sup=input.VarQuantTextColor(),
+                                       text_size=input.VarTextSize(),
+                                       repel=input.VarPlotRepel(),
+                                       ggtheme=pn.theme_gray())
+                elif model.quali_sup is not None:
+                    fig = fviz_mca_var(self=model,
+                                       axis=[int(input.Axis1()),int(input.Axis2())],
+                                       title=input.VarTitle(),
+                                       color=input.VarTextActifColor(),
+                                       color_sup=input.VarSupTextSupColor(),
+                                       text_size=input.VarTextSize(),
+                                       repel=input.VarPlotRepel(),
+                                       ggtheme=pn.theme_gray())
+                elif model.quanti_sup is not None:
+                    fig = fviz_mca_var(self=model,
+                                       axis=[int(input.Axis1()),int(input.Axis2())],
+                                       title=input.VarTitle(),
+                                       color=input.VarTextActifColor(),
+                                       color_quanti_sup=input.VarQuantTextColor(),
+                                       text_size=input.VarTextSize(),
+                                       repel=input.VarPlotRepel(),
+                                       ggtheme=pn.theme_gray())
                 else:
-                    fig = fviz_mca_var(
-                        self=fa_model,
-                        axis=[int(input.Axis1()),int(input.Axis2())],
-                        title=input.VarTitle(),
-                        color=input.VarTextActifColor(),
-                        text_size=input.VarTextSize(),
-                        lim_cos2 = input.VarLimCos2(),
-                        repel=input.VarPlotRepel()
-                        )
+                    fig = fviz_mca_var(self=model,
+                                       axis=[int(input.Axis1()),int(input.Axis2())],
+                                       title=input.VarTitle(),
+                                       color=input.VarTextActifColor(),
+                                       text_size=input.VarTextSize(),
+                                       repel=input.VarPlotRepel(),
+                                       ggtheme=pn.theme_gray())
                 return fig
 
             # Variables Factor Map - MCA
@@ -1051,12 +1027,11 @@ class MCAshiny:
             # Supplementary Continuous variables MAP
             @reactive.Calc
             def VarQuantFactorPlot():
-                fig =  fviz_corrcircle(
-                    self=fa_model,
-                    axis=[int(input.Axis1()),int(input.Axis2())],
-                    title=input.VarQuantTitle(),
-                    text_size=input.VarQuantTextSize()
-                )
+                fig =  fviz_corrcircle(self=model,
+                                       axis=[int(input.Axis1()),int(input.Axis2())],
+                                       title=input.VarQuantTitle(),
+                                       text_size=input.VarQuantTextSize(),
+                                       ggtheme=pn.theme_gray())
                 return fig
             
             @output
@@ -1072,19 +1047,18 @@ class MCAshiny:
             @output
             @render.plot(alt="Scree Plot - MCA")
             def EigenPlot():
-                EigenFig = fviz_eig(self=fa_model,
+                EigenFig = fviz_eig(self=model,
                                     choice=input.EigenChoice(),
-                                    add_labels=input.EigenLabel())
+                                    add_labels=input.EigenLabel(),
+                                    ggtheme=pn.theme_gray())
                 return EigenFig.draw()
             
             # Eigen value - DataFrame
-            @output
             @render.data_frame
             def EigenTable():
-                EigenData = get_eig(fa_model).round(4).reset_index().rename(columns={"index":"dimensions"})
+                EigenData = model.eig_.round(4).reset_index().rename(columns={"index":"dimensions"})
                 EigenData.columns = [x.capitalize() for x in EigenData.columns]
-                return DataTable(data=match_datalength(EigenData,input.EigenLen()),
-                                filters=input.EigenFilter())
+                return DataTable(data=match_datalength(EigenData,input.EigenLen()),filters=input.EigenFilter())
             
             #---------------------------------------------------------------------------------------------
             #################################################################################################
@@ -1095,36 +1069,35 @@ class MCAshiny:
             @output
             @render.data_frame
             def ModCoordTable():
-                ModCoord = get_mca_mod(fa_model)["coord"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return DataTable(data=match_datalength(data=ModCoord,value=input.ModCoordLen()),
-                                filters=input.ModCoordFilter())
+                ModCoord = model.var_["coord"].round(4).reset_index()
+                ModCoord.columns = ["Categories", *ModCoord.columns[1:]]
+                return DataTable(data=match_datalength(data=ModCoord,value=input.ModCoordLen()),filters=input.ModCoordFilter())
             
             #----------------------------------------------------------------------------------------------------
             # Variables Contributions
             @output
             @render.data_frame
             def ModContribTable():
-                ModContrib = get_mca_mod(fa_model)["contrib"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return  DataTable(data=match_datalength(data=ModContrib,value=input.ModContribLen()),
-                                filters=input.ModContribFilter())
+                ModContrib = model.var_["contrib"].round(4).reset_index()
+                ModContrib.columns = ["Categories", *ModContrib.columns[1:]]
+                return  DataTable(data=match_datalength(data=ModContrib,value=input.ModContribLen()),filters=input.ModContribFilter())
             
             #-----------------------------------------------------------------------------------------------------
             # Add Variables Contributions Modal Show
             @reactive.Effect
             @reactive.event(input.ModContribGraphBtn)
             def _():
-                GraphModalShow(text="Mod",name="Contrib")
+                GraphModalShow(text="Mod",name="Contrib",max_axis=model.call_["n_components"])
             
             @reactive.Calc
             def ModContribMap():
-                fig = fviz_contrib(
-                    self=fa_model,
-                    choice="mod",
-                    axis=input.ModContribAxis(),
-                    top_contrib=int(input.ModContribTop()),
-                    color=input.ModContribColor(),
-                    bar_width=input.ModContribBarWidth()
-                    )
+                fig = fviz_contrib(self=model,
+                                   choice="var",
+                                   axis=input.ModContribAxis(),
+                                   top_contrib=int(input.ModContribTop()),
+                                   color=input.ModContribColor(),
+                                   bar_width=input.ModContribBarWidth(),
+                                   ggtheme=pn.theme_gray())
                 return fig
 
             # Plot variables Contributions
@@ -1133,58 +1106,31 @@ class MCAshiny:
             def ModContribPlot():
                 return ModContribMap().draw()
             
-            #----------------------------------------------------------------------------------------------------------------
-            # Add Variables catgories contributions correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.ModContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Mod",name="Contrib",title=None)
-            
-            @reactive.Calc
-            def ModContribCorrMap():
-                ModContrib = get_mca_mod(fa_model)["contrib"]
-                fig = fviz_corrplot(
-                    X=ModContrib,
-                    title=input.ModContribCorrTitle(),
-                    outline_color=input.ModContribCorrColor(),
-                    colors=[input.ModContribCorrLowColor(),
-                            input.ModContribCorrMidColor(),
-                            input.ModContribCorrHightColor()
-                            ]
-                    )+pn.theme_gray()
-                return fig
-
-            # Plot variables Contributions/correlations Map - PCA
-            @output
-            @render.plot(alt="Variables categories contributions/correlations Map - MCA")
-            def ModContribCorrPlot():
-                return ModContribCorrMap().draw()
-            
             #-----------------------------------------------------------------------------------------------------------
             # Variables categories Cos2 
             @output
             @render.data_frame
             def ModCos2Table():
-                ModCos2 = get_mca_mod(fa_model)["cos2"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return  DataTable(data=match_datalength(data=ModCos2,value=input.ModCos2Len()),
-                                filters=input.ModCos2Filter())
+                ModCos2 = model.var_["cos2"].round(4).reset_index()
+                ModCos2.columns = ["Categories", *ModCos2.columns[1:]]
+                return  DataTable(data=match_datalength(data=ModCos2,value=input.ModCos2Len()),filters=input.ModCos2Filter())
             
             #-------------------------------------------------------------------------------------------------------------
             # Add Variables Cos2 Modal Show
             @reactive.Effect
             @reactive.event(input.ModCos2GraphBtn)
             def _():
-                GraphModalShow(text="Mod",name="Cos2")
+                GraphModalShow(text="Mod",name="Cos2",max_axis=model.call_["n_components"])
             
             @reactive.Calc
             def ModCos2Map():
-                fig = fviz_cosines(
-                    self=fa_model,
-                    choice="mod",
-                    axis=input.ModCos2Axis(),
-                    top_cos2=int(input.ModCos2Top()),
-                    color=input.ModCos2Color(),
-                    bar_width=input.ModCos2BarWidth())
+                fig = fviz_cos2(self=model,
+                                choice = "var",
+                                axis=input.ModCos2Axis(),
+                                top_cos2=int(input.ModCos2Top()),
+                                color=input.ModCos2Color(),
+                                bar_width=input.ModCos2BarWidth(),
+                                ggtheme=pn.theme_gray())
                 return fig
 
             # Plot variables categories Cos2
@@ -1193,33 +1139,6 @@ class MCAshiny:
             def ModCos2Plot():
                 return ModCos2Map().draw()
             
-            #----------------------------------------------------------------------------------------
-            # Add Variables categories Cosinus Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.ModCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Mod",name="Cos2",title=None)
-            
-            @reactive.Calc
-            def ModCos2CorrMap():
-                ModCos2 = get_mca_mod(fa_model)["cos2"]
-                fig = fviz_corrplot(
-                    X=ModCos2,
-                    title=input.ModCos2CorrTitle(),
-                    outline_color=input.ModCos2CorrColor(),
-                    colors=[input.ModCos2CorrLowColor(),
-                            input.ModCos2CorrMidColor(),
-                            input.ModCos2CorrHightColor()
-                            ])+pn.theme_gray()
-                return fig
-
-            #--------------------------------------------------------------------------------------------------
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Variables categories Contributions/Correlations Map - MCA")
-            def ModCos2CorrPlot():
-                return ModCos2CorrMap().draw()
-            
             ########################################################################################################
             # Individuals informations
             #---------------------------------------------------------------------------------------------
@@ -1227,181 +1146,99 @@ class MCAshiny:
             @output
             @render.data_frame
             def IndCoordTable():
-                IndCoord = get_mca_ind(fa_model)["coord"].round(4).reset_index()
-                return DataTable(data = match_datalength(IndCoord,input.IndCoordLen()),
-                                filters=input.IndCoordFilter())
+                IndCoord = model.ind_["coord"].round(4).reset_index()
+                IndCoord.columns = ["Individus", *IndCoord.columns[1:]]
+                return DataTable(data = match_datalength(IndCoord,input.IndCoordLen()),filters=input.IndCoordFilter())
             
             # Individuals Contributions
             @output
             @render.data_frame
             def IndContribTable():
-                IndContrib = get_mca_ind(fa_model)["contrib"].round(4).reset_index()
-                return  DataTable(data=match_datalength(IndContrib,input.IndContribLen()),
-                                filters=input.IndContribFilter())
+                IndContrib = model.ind_["contrib"].round(4).reset_index()
+                IndContrib.columns = ["Individus", *IndContrib.columns[1:]]
+                return  DataTable(data=match_datalength(IndContrib,input.IndContribLen()),filters=input.IndContribFilter())
             
             # Add indiviuals Contributions Modal Show
             @reactive.Effect
             @reactive.event(input.IndContribGraphBtn)
             def _():
-                GraphModalShow(text="Ind",name="Contrib")
+                GraphModalShow(text="Ind",name="Contrib",max_axis=model.call_["n_components"])
 
             # Plot Individuals Contributions
             @output
             @render.plot(alt="Individuals Contributions Map - MCA")
             def IndContribPlot():
-                IndContribFig = fviz_contrib(self=fa_model,
-                                            choice="ind",
-                                            axis=input.IndContribAxis(),
-                                            top_contrib=int(input.IndContribTop()),
-                                            color = input.IndContribColor(),
-                                            bar_width= input.IndContribBarWidth())
+                IndContribFig = fviz_contrib(self=model,
+                                             choice="ind",
+                                             axis=input.IndContribAxis(),
+                                             top_contrib=int(input.IndContribTop()),
+                                             color = input.IndContribColor(),
+                                             bar_width= input.IndContribBarWidth(),
+                                             ggtheme=pn.theme_gray())
                 return IndContribFig.draw()
-            
-            # Add Variables Contributions Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Ind",name="Contrib",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Contributions/Correlations Map - MCA")
-            def IndContribCorrPlot():
-                IndContrib = get_mca_ind(fa_model)["contrib"]
-                IndContribCorrFig = fviz_corrplot(X=IndContrib,
-                                                title=input.IndContribCorrTitle(),
-                                                outline_color=input.IndContribCorrColor(),
-                                                colors=[input.IndContribCorrLowColor(),
-                                                        input.IndContribCorrMidColor(),
-                                                        input.IndContribCorrHightColor()
-                                                        ])+pn.theme_gray()
-                return IndContribCorrFig.draw()
             
             # Individuals Cos2 
             @output
             @render.data_frame
             def IndCos2Table():
-                IndCos2 = get_mca_ind(fa_model)["cos2"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndCos2,input.IndCos2Len()),
-                                filters=input.IndCos2Filter())
+                IndCos2 = model.ind_["cos2"].round(4).reset_index()
+                IndCos2.columns = ["Individus", *IndCos2.columns[1:]]
+                return  DataTable(data = match_datalength(IndCos2,input.IndCos2Len()),filters=input.IndCos2Filter())
             
             # Add Variables Cos2 Modal Show
             @reactive.Effect
             @reactive.event(input.IndCos2GraphBtn)
             def _():
-                GraphModalShow(text="Ind",name="Cos2")
+                GraphModalShow(text="Ind",name="Cos2",max_axis=model.call_["n_components"])
 
             # Plot variables Cos2
             @output
             @render.plot(alt="Individuals Cosines Map - MCA")
             def IndCos2Plot():
-                IndCos2Fig = fviz_cosines(self=fa_model,
-                                choice="ind",
-                                axis=input.IndCos2Axis(),
-                                top_cos2=int(input.IndCos2Top()),
-                                color=input.IndCos2Color(),
-                                bar_width=input.IndCos2BarWidth())
+                IndCos2Fig = fviz_cos2(self=model,
+                                       choice="ind",
+                                       axis=input.IndCos2Axis(),
+                                       top_cos2=int(input.IndCos2Top()),
+                                       color=input.IndCos2Color(),
+                                       bar_width=input.IndCos2BarWidth(),
+                                       ggtheme=pn.theme_gray())
                 return IndCos2Fig.draw()
-            
-            # Add Variables Cosines Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Ind",name="Cos2",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Cosinus/Correlations Map - MCA")
-            def IndCos2CorrPlot():
-                IndCos2 = get_mca_ind(fa_model)["cos2"]
-                IndCos2CorrFig = fviz_corrplot(X=IndCos2,
-                                            title=input.IndCos2CorrTitle(),
-                                            outline_color=input.IndCos2CorrColor(),
-                                            colors=[input.IndCos2CorrLowColor(),
-                                                    input.IndCos2CorrMidColor(),
-                                                    input.IndCos2CorrHightColor()
-                                                ])+pn.theme_gray()
-                return IndCos2CorrFig.draw()
             
             ###########################################################################################
             #   Variables informations
             #------------------------------------------------------------------------------------------
             # Variables - Rapport de corrélation
-            @output
             @render.data_frame
             def VarEta2Table():
-                VarEta2 = get_mca_var(fa_model)["eta2"].round(4).reset_index()
-                return DataTable(data = match_datalength(VarEta2,input.VarEta2Len()),
-                                 filters=input.VarEta2Filter())
+                VarEta2 = model.var_["eta2"].round(4).reset_index()
+                VarEta2.columns = ["Variables", *VarEta2.columns[1:]]
+                return DataTable(data = match_datalength(VarEta2,input.VarEta2Len()),filters=input.VarEta2Filter())
             
             # Variables Contributions
-            @output
             @render.data_frame
-            def VarCos2Table():
-                VarCos2 = get_mca_var(fa_model)["cos2"].round(4).reset_index()
-                return  DataTable(data=match_datalength(VarCos2,input.VarCos2Len()),
-                                  filters=input.VarCos2Filter())
+            def VarContribTable():
+                VarContrib = model.var_["var_contrib"].round(4).reset_index()
+                VarContrib.columns = ["Variables", *VarContrib.columns[1:]]
+                return  DataTable(data=match_datalength(VarContrib,input.VarContribLen()),filters=input.VarContribFilter())
             
             ############################################################################################
             #    Supplementary individuals informations
             #-------------------------------------------------------------------------------------------
-            # Supplementaru Individual Coordinates
+            # Supplementary Individual Coordinates
             @output
             @render.data_frame
             def IndSupCoordTable():
-                IndSupCoord = get_mca_ind(fa_model)["ind_sup"]["coord"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndSupCoord,input.IndSupCoordLen()),
-                                  filters=input.IndSupCoordFilter())
+                IndSupCoord = model.ind_sup_["coord"].round(4).reset_index()
+                IndSupCoord.columns = ["Individus", *IndSupCoord.columns[1:]]
+                return  DataTable(data = match_datalength(IndSupCoord,input.IndSupCoordLen()),filters=input.IndSupCoordFilter())
             
             # Supplementaru Individual Cos2
             @output
             @render.data_frame
             def IndSupCos2Table():
-                IndSupCos2 = get_mca_ind(fa_model)["ind_sup"]["cos2"].round(4).reset_index()
-                return  DataTable(data = match_datalength(IndSupCos2,input.IndSupCos2Len()),
-                                  filters=input.IndSupCos2Filter())
-            
-            # Add Variables Cos2 Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndSupCos2GraphBtn)
-            def _():
-                GraphModalShow(text="IndSup",name="Cos2")
-
-            # Plot variables Cos2
-            @output
-            @render.plot(alt="Supplementary Individuals Cosines Map - PCA")
-            def IndSupCos2Plot():
-                IndSupCos2 = get_mca_ind(fa_model)["ind_sup"]["cos2"]
-                IndSupCos2Fig = fviz_barplot(X=IndSupCos2,
-                                            axis=input.IndSupCos2Axis(),
-                                            top_corr=int(input.IndSupCos2Top()),
-                                            color=input.IndSupCos2Color(),
-                                            bar_width=input.IndSupCos2BarWidth(),
-                                            ylabel="Supplementary individuals",
-                                            xlabel="Cosinus",
-                                            title=f"Cosinus of supplementary individuals to Dim-{input.IndSupCos2Axis()+1}")
-                return IndSupCos2Fig.draw()
-            
-            # Add Variables Cosines Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.IndSupCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="IndSup",name="Cos2",title=None)
-
-            # Plot variables Contributions
-            @output
-            @render.plot(alt="Individuals Cosinus/Correlations Map - PCA")
-            def IndSupCos2CorrPlot():
-                IndSupCos2 = get_mca_ind(fa_model)["ind_sup"]["cos2"]
-                IndSupCos2CorrFig = fviz_corrplot(X=IndSupCos2,
-                                                title=input.IndSupCos2CorrTitle(),
-                                                outline_color=input.IndSupCos2CorrColor(),
-                                                colors=[input.IndSupCos2CorrLowColor(),
-                                                        input.IndSupCos2CorrMidColor(),
-                                                        input.IndSupCos2CorrHightColor()
-                                                        ],
-                                                    xlabel="Supplementary individuals")+pn.theme_gray()
-                return IndSupCos2CorrFig.draw()
+                IndSupCos2 = model.ind_sup_["cos2"].round(4).reset_index()
+                IndSupCos2.columns = ["Individus", *IndSupCos2.columns[1:]]
+                return  DataTable(data = match_datalength(IndSupCos2,input.IndSupCos2Len()),filters=input.IndSupCos2Filter())
             
             ##########################################################################################
             # Supplementary continuous variables
@@ -1410,84 +1247,41 @@ class MCAshiny:
             @output
             @render.data_frame
             def VarQuantCoordTable():
-                VarQuantCoord = get_mca_var(fa_model)["quanti_sup"]["coord"].round(4).reset_index().rename(columns={"index":"variables"})
-                return  DataTable(data = match_datalength(VarQuantCoord,input.VarQuantCoordLen()),
-                                  filters=input.VarQuantCoordFilter())
+                VarQuantCoord = model.quanti_sup_["coord"].round(4).reset_index()
+                VarQuantCoord.columns = ["Individus", *VarQuantCoord.columns[1:]]
+                return  DataTable(data = match_datalength(VarQuantCoord,input.VarQuantCoordLen()),filters=input.VarQuantCoordFilter())
             
             # Supplementary continuous variables cos2
             @output
             @render.data_frame
             def VarQuantCos2Table():
-                VarQuantCos2 = get_mca_var(fa_model)["quanti_sup"]["cos2"].round(4).reset_index().rename(columns={"index":"variables"})
-                return  DataTable(data = match_datalength(VarQuantCos2,input.VarQuantCos2Len()),
-                                  filters=input.VarQuantCos2Filter())
+                VarQuantCos2 = model.quanti_sup_["cos2"].round(4).reset_index()
+                VarQuantCos2.columns = ["Individus", *VarQuantCos2.columns[1:]]
+                return  DataTable(data = match_datalength(VarQuantCos2,input.VarQuantCos2Len()),filters=input.VarQuantCos2Filter())
 
             ###########################################################################################
             # Supplementary variables categories
             #-------------------------------------------------------------------------------------------
             ## Supplementary Variables/categories coordinates
-            @output
             @render.data_frame
             def VarSupCoordTable():
-                VarSupCoord = get_mca_mod(fa_model)["sup"]["coord"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return DataTable(data=match_datalength(data=VarSupCoord,value=input.VarSupCoordLen()),
-                                 filters=input.VarSupCoordFilter())
+                VarSupCoord = model.quali_sup_["coord"].round(4).reset_index()
+                VarSupCoord.columns = ["Categories", *VarSupCoord.columns[1:]]
+                return DataTable(data=match_datalength(data=VarSupCoord,value=input.VarSupCoordLen()),filters=input.VarSupCoordFilter())
             
-            #----------------------------------------------------------------------------------------
-            # Supplementary variables/categories Cosinus
-            @output
+            # Supplementary variables/categories Cos2
             @render.data_frame
             def VarSupCos2Table():
-                VarSupCos2 = get_mca_mod(fa_model)["sup"]["cos2"].round(4).reset_index().rename(columns={"index" : "Categories"})
-                return DataTable(data=match_datalength(data=VarSupCos2,value=input.VarSupCos2Len()),
-                                 filters=input.VarSupCos2Filter())
+                VarSupCos2 = model.quali_sup_["cos2"].round(4).reset_index()
+                VarSupCos2.columns = ["Categories", *VarSupCos2.columns[1:]]
+                return DataTable(data=match_datalength(data=VarSupCos2,value=input.VarSupCos2Len()),filters=input.VarSupCos2Filter())
             
-            # Add Variables Cos2 Modal Show
-            @reactive.Effect
-            @reactive.event(input.VarSupCos2GraphBtn)
-            def _():
-                GraphModalShow(text="VarSup",name="Cos2")
-
-            # Plot variables Cos2
-            @output
-            @render.plot(alt="Supplementary variables categories Cosines Map - MCA")
-            def VarSupCos2Plot():
-                VarSupCos2Fig = fviz_cosines(self=fa_model,
-                                            choice="quali_sup",
-                                            axis=input.VarSupCos2Axis(),
-                                            top_cos2=int(input.VarSupCos2Top()),
-                                            color=input.VarSupCos2Color(),
-                                            bar_width=input.VarSupCos2BarWidth())
-                return VarSupCos2Fig.draw()
-            
-            # Add Variables cosinus/correlations Modal show
-            @reactive.Effect
-            @reactive.event(input.VarSupCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="VarSup",name="Cos2",title=None)
-            
-            # Add reactive figure
-            @reactive.Calc
-            def VarSupCos2CorrMap():
-                VarSupCos2 = get_mca_mod(fa_model)["sup"]["cos2"]
-                fig = fviz_corrplot(
-                    X=VarSupCos2,
-                    title = input.VarSupCos2CorrTitle(),
-                    outline_color=input.VarSupCos2CorrColor(),
-                    colors=[input.VarSupCos2CorrLowColor(),
-                            input.VarSupCos2CorrMidColor(),
-                            input.VarSupCos2CorrHightColor()
-                            ],
-                        ylabel="Dimensions",
-                        xlabel="Supplementary variables categories"
-                    )+pn.theme_gray()
-                return fig
-            
-            # Plot variables cosinus/correlations
-            @output
-            @render.plot(alt="Supplementary Variables categories Cosinus/correlations Map - MCA")
-            def VarSupCos2CorrPlot():
-                return VarSupCos2CorrMap().draw()
+            # Supplementary variables/categories Vtest
+            @render.data_frame
+            def VarSupVtestTable():
+                VarSupVtest = model.quali_sup_["vtest"].round(4).reset_index()
+                VarSupVtest.columns = ["Categories", *VarSupVtest.columns[1:]]
+                return DataTable(data=match_datalength(data=VarSupVtest,value=input.VarSupVtestLen()),filters=input.VarSupVtestFilter())
             
             ############################################################################################
             #    Tab : Description automatique des axes
@@ -1497,7 +1291,7 @@ class MCAshiny:
             @output
             @render.ui
             def DimDesc():
-                if fa_model.quanti_sup_labels_ is not None:
+                if model.quanti_sup is not None:
                     return ui.TagList(
                         ui.h5("Variables qualitative"),
                         PanelConditional1(text="Dim1",name="Desc"),
@@ -1515,7 +1309,7 @@ class MCAshiny:
             @output
             @render.data_frame
             def Dim1DescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None,proba=input.pvalueDimdesc())
+                DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescQuali = DimDesc[input.Dimdesc()]["quali"].reset_index().rename(columns={"index":"Variables"})
                 elif isinstance(DimDesc[input.Dimdesc()],pd.DataFrame):
@@ -1529,7 +1323,7 @@ class MCAshiny:
             @output
             @render.data_frame
             def Dim2DescTable():
-                DimDesc = dimdesc(self=fa_model,axis=None,proba=input.pvalueDimdesc())
+                DimDesc = dimdesc(self=model,axis=None,proba=float(input.pvalueDimdesc()))
                 if isinstance(DimDesc[input.Dimdesc()],dict):
                     DimDescQuanti = DimDesc[input.Dimdesc()]["quanti"].reset_index().rename(columns={"index":"Variables"})
                 else:
@@ -1541,25 +1335,47 @@ class MCAshiny:
             #   Tab : Resumé du jeu de données
             ###########################################################################################
             #-----------------------------------------------------------------------------------------------
-            ### Statistiques descriptives
-            @output
+            ### Chi2 statistic test
             @render.data_frame
-            def StatsDescTable():
-                StatsDesc = fa_model.original_data_.describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
-                return  DataTable(data = match_datalength(StatsDesc,input.StatsDescLen()),
-                                filters=input.StatsDescFilter())
+            def Chi2TestTable():
+                return  DataTable(data = match_datalength(model.chi2_test_,input.Chi2TestLen()),filters=input.Chi2TestFilter())
+            
+            @render.data_frame
+            def OthersTestTable():
+                # Create Data
+                data = model.call_["X"]
+                if model.quali_sup is not None:
+                    X_quali_sup = model.call_["Xtot"].loc[:,model.quali_sup_["eta2"].index.tolist()].astype("object")
+                    if model.ind_sup is not None:
+                        X_quali_sup = X_quali_sup.drop(index=[name for name in model.call_["Xtot"].index.tolist() if name in model.ind_sup_["coord"].index.tolist()])
+                    data = pd.concat([data,X_quali_sup],axis=1)
+
+                others_test = pd.DataFrame(columns=["variable1","variable2","cramer","tschuprow","pearson"]).astype("float")
+                idx = 0
+                for i in np.arange(data.shape[1]-1):
+                    for j in np.arange(i+1,data.shape[1]):
+                        tab = pd.crosstab(data.iloc[:,i],data.iloc[:,j])
+                        row_others = pd.DataFrame({"variable1" : data.columns.tolist()[i],
+                                                   "variable2" : data.columns.tolist()[j],
+                                                   "cramer"    : sp.stats.contingency.association(tab,method="cramer"),
+                                                   "tschuprow" : sp.stats.contingency.association(tab,method="tschuprow"),
+                                                   "pearson"   : sp.stats.contingency.association(tab,method="pearson")},
+                                                   index=[idx])
+                        others_test = pd.concat((others_test,row_others),axis=0,ignore_index=True)
+                        idx = idx + 1
+                return  DataTable(data = match_datalength(others_test,input.OthersTestLen()),filters=input.OthersTestFilter())
 
             #---------------------------------------------------------------------------------------------
             # Diagramme en barres
             @output
             @render.plot(alt="Bar-Plot")
             def VarBarPlotGraph():
-                data = fa_model.original_data_
-                if fa_model.quali_sup_labels_ is not None:
-                    quali_sup = fa_model.data_[fa_model.quali_sup_labels_]
-                    data = pd.concat([data,quali_sup],axis=1)
-                    if fa_model.row_sup_labels_ is not None:
-                        data = data.drop(index=fa_model.row_sup_labels_)
+                data = model.call_["X"]
+                if model.quali_sup is not None:
+                    X_quali_sup = model.call_["Xtot"].loc[:,model.quali_sup_["eta2"].index.tolist()].astype("object")
+                    if model.ind_sup is not None:
+                        X_quali_sup = X_quali_sup.drop(index=[name for name in model.call_["Xtot"].index.tolist() if name in model.ind_sup_["coord"].index.tolist()])
+                    data = pd.concat([data,X_quali_sup],axis=1)
                 p = pn.ggplot(data,pn.aes(x=input.VarLabel()))+ pn.geom_bar()
                 return p.draw()
             
@@ -1571,9 +1387,8 @@ class MCAshiny:
             @output
             @render.data_frame
             def OverallDataTable():
-                overalldata = fa_model.data_.reset_index()
-                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),
-                                filters=input.OverallDataFilter())
+                overalldata = model.call_["Xtot"].reset_index()
+                return DataTable(data = match_datalength(overalldata,input.OverallDataLen()),filters=input.OverallDataFilter())
             
             ###########################################################
             # Exit

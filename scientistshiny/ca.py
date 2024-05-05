@@ -2,16 +2,17 @@
 from shiny import App, Inputs, Outputs, Session, render, ui, reactive
 import shinyswatch
 from pathlib import Path
+import numpy as np
 import pandas as pd
-import patchworklib as pw
+#import patchworklib as pw
 import plotnine as pn
 import matplotlib.colors as mcolors
 import nest_asyncio
 import uvicorn
 
-#  All scientisttools fonctions
 from sklearn.base import BaseEstimator, TransformerMixin
 from scientisttools import fviz_ca_row,fviz_ca_col,fviz_eig, fviz_contrib,fviz_cos2,fviz_corrplot,dimdesc
+
 from .function import *
 
 colors = mcolors.CSS4_COLORS
@@ -43,13 +44,17 @@ class CAshiny(BaseEstimator,TransformerMixin):
     Returns:
     -------
     Graphs : a tab containing the the row and column points factor map (with supplementary columns and supplementary rows)
+
     Values : a tab containing the summary of the CA performed, the eigenvalues, the results
              for the columns, for the rows, for the supplementary columns and for the supplementarry rows
              variables and the results for the categorical variables.
+
     Automatic description of axes : a tab containing the output of the dimdesc function. This function is designed to 
                                     point out the variables and the categories that are the most characteristic according
                                     to each dimension obtained by a Factor Analysis.
+
     Summary of dataset : A tab containing the summary of the dataset and a boxplot and histogramm for quantitative variables.
+
     Data : a tab containing the dataset with a nice display.
 
     The left part of the application allows to change some elements of the graphs (axes, variables, colors,.)
@@ -94,15 +99,16 @@ class CAshiny(BaseEstimator,TransformerMixin):
             value_choice.update({"QualiSupRes" : "Résultats pour les variables qualitatives supplémentaires"})
 
         # Dimension to return
+        nbDim = min(3,model.call_["n_components"])
         DimDescChoice = {}
-        for i in range(min(3,model.call_["n_components"])):
+        for i in range(nbDim):
             DimDescChoice.update({"Dim."+str(i+1) : "Dimension "+str(i+1)})
 
         # App UI
         app_ui = ui.page_fluid(
             ui.include_css(css_path),
             shinyswatch.theme.superhero(),
-            ui.page_navbar(title=ui.div(ui.panel_title(ui.h2("Analyse des Correspondances"),window_title="CAshiny"),align="center"),inverse=True,id="navbar_id",padding={"style": "text-align: center;"}),
+            ui.page_navbar(title=ui.div(ui.panel_title(ui.h2("Analyse Factorielle des Correspondances"),window_title="CAshiny"),align="center"),inverse=True,id="navbar_id",padding={"style": "text-align: center;"}),
             ui.page_sidebar(
                 ui.sidebar(
                     ui.panel_well(
@@ -321,7 +327,9 @@ class CAshiny(BaseEstimator,TransformerMixin):
                         OverallPanelConditional(text="Col"),
                         OverallPanelConditional(text="Row"),
                         ui.output_ui("RowSupPanel"),
-                        ui.output_ui("ColSupPanel")
+                        ui.output_ui("ColSupPanel"),
+                        ui.output_ui("QuantiSupPanel"),
+                        ui.output_ui("QualiSupPanel")
                     ),
                     ui.nav_panel("Description automatique des axes",
                         ui.input_radio_buttons(id="Dimdesc",
@@ -330,12 +338,14 @@ class CAshiny(BaseEstimator,TransformerMixin):
                         ui.output_ui(id="DimDesc")
                     ),
                     ui.nav_panel("Résumé du jeu de données",
-                        PanelConditional1(text="ResumeData",name="")
+                        ui.h5("Distributions conditionelles (X/Y)"),
+                        PanelConditional1(text="CondDist",name="One"),
+                        ui.hr(),
+                        ui.h5("Distributions conditionnelles (Y/X)"),
+                        PanelConditional1(text="CondDist",name="Two") 
                     ),
                     ui.nav_panel("Données",
-                        PanelConditional1(text="OverallData",name="")
-                        
-                    )
+                                 PanelConditional1(text="OverallData",name=""))
                 )
             )
         )
@@ -442,19 +452,14 @@ class CAshiny(BaseEstimator,TransformerMixin):
                 return ui.panel_conditional("input.choice == 'RowSupRes'",
                             ui.br(),
                             ui.h5("Coordonnées"),
-                            PanelConditional1(text="RowSup",name="Coord")
+                            PanelConditional1(text="RowSup",name="Coord"),
+                            ui.hr(),
+                            ui.h5("Cos2 - Qualité de la représentation"),
+                            PanelConditional1(text="RowSup",name="Cos2") 
                         )
             
-            # Add supplementary Columns Conditional Panel
-            @output
-            @render.ui
-            def ColSupPanel():
-                return ui.panel_conditional("input.choice == 'ColSupRes'",
-                            ui.br(),
-                            ui.h5("Coordonnées"),
-                            PanelConditional1(text="ColSup",name="Coord")
-                        )
-
+            
+            
             # -------------------------------------------------------
             @reactive.Effect
             @reactive.event(input.exit)
@@ -521,9 +526,9 @@ class CAshiny(BaseEstimator,TransformerMixin):
                 return RowFactorPlot().draw()
             
             # Downlaod
-            @session.download(filename="Rows-Factor-Map.png")
-            def RowGraphDownloadPng():
-                return pw.load_ggplot(RowFactorPlot()).savefig("Rows-Factor-Map.png")
+            # @session.download(filename="Rows-Factor-Map.png")
+            # def RowGraphDownloadPng():
+            #     return pw.load_ggplot(RowFactorPlot()).savefig("Rows-Factor-Map.png")
             
             #--------------------------------------------------------------------------------
             # Reactive Columns Plot
@@ -599,7 +604,6 @@ class CAshiny(BaseEstimator,TransformerMixin):
                 return EigenFig.draw()
             
             # Eigen value - DataFrame
-            @output
             @render.data_frame
             def EigenTable():
                 EigenData = model.eig_.round(4).reset_index().rename(columns={"index":"dimensions"})
@@ -611,38 +615,36 @@ class CAshiny(BaseEstimator,TransformerMixin):
             #############################################################################################
             #---------------------------------------------------------------------------------------------
             # Columns Coordinates
-            @output
             @render.data_frame
             def ColCoordTable():
-                ColCoord = model.col_["coord"].round(4).reset_index().rename(columns={"index" : "Columns"})
-                return DataTable(data=match_datalength(data=ColCoord,value=input.ColCoordLen()),
-                                filters=input.ColCoordFilter())
+                ColCoord = model.col_["coord"].round(4).reset_index()
+                ColCoord.columns = ["Columns", *ColCoord.columns[1:]]
+                return DataTable(data=match_datalength(data=ColCoord,value=input.ColCoordLen()),filters=input.ColCoordFilter())
             
             #--------------------------------------------------------------------------------------------------
             # Columns Contributions
-            @output
             @render.data_frame
             def ColContribTable():
-                ColContrib = model.col_["contrib"].round(4).reset_index().rename(columns={"index" : "Columns"})
-                return  DataTable(data=match_datalength(data=ColContrib,value=input.ColContribLen()),
-                                  filters=input.ColContribFilter())
+                ColContrib = model.col_["contrib"].round(4).reset_index()
+                ColContrib.columns = ["Columns", *ColContrib.columns[1:]]
+                return  DataTable(data=match_datalength(data=ColContrib,value=input.ColContribLen()),filters=input.ColContribFilter())
             
             # Add Columns Contributions Modal Show
             @reactive.Effect
             @reactive.event(input.ColContribGraphBtn)
             def _():
-                GraphModalShow(text="Col",name="Contrib")
+                GraphModalShow(text="Col",name="Contrib",max_axis=nbDim)
 
             # Reactive Columns Contributions Map
             @reactive.Calc
             def ColContribMap():
                 fig = fviz_contrib(self=model,
-                                    choice="col",
-                                    axis=input.ColContribAxis(),
-                                    top_contrib=int(input.ColContribTop()),
-                                    color=input.ColContribColor(),
-                                    bar_width=input.ColContribBarWidth(),
-                                    ggtheme=pn.theme_gray())
+                                   choice="col",
+                                   axis=input.ColContribAxis(),
+                                   top_contrib=int(input.ColContribTop()),
+                                   color=input.ColContribColor(),
+                                   bar_width=input.ColContribBarWidth(),
+                                   ggtheme=pn.theme_gray())
                 return fig
             
             # Plot columns Contributions
@@ -651,49 +653,21 @@ class CAshiny(BaseEstimator,TransformerMixin):
             def ColContribPlot():
                 return ColContribMap().draw()
             
-            #----- Download Button
-
-            # Add Variables Contributions/Correlations Modal Show
-            @reactive.Effect
-            @reactive.event(input.ColContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Col",name="Contrib",title=None)
-
-            # Reactive columns contribution/correlations Map
-            @reactive.Calc
-            def ColContribCorrMap():
-                fig = fviz_corrplot(X=model.col_["contrib"],
-                                    title=input.ColContribCorrTitle(),
-                                    outline_color=input.ColContribCorrColor(),
-                                    x_label="Columns",
-                                    colors=[input.ColContribCorrLowColor(),
-                                            input.ColContribCorrMidColor(),
-                                            input.ColContribCorrHightColor()
-                                            ],
-                                    ggtheme=pn.theme_gray())
-                return fig
-
-            # Plot Columns Contributions
-            @output
-            @render.plot(alt="Columns Contributions/Correlations Map - CA")
-            def ColContribCorrPlot():
-                return ColContribCorrMap().draw()
-            
-            # Download button
+            #----- Download Button to add
 
             #--------------------------------------------------------------------------------------------
             # Columns Cos2
-            @output
             @render.data_frame
             def ColCos2Table():
-                ColCos2 = model.col_["cos2"].round(4).reset_index().rename(columns={"index" : "Columns"})
+                ColCos2 = model.col_["cos2"].round(4).reset_index()
+                ColCos2.columns = ["Columns", *ColCos2.columns[1:]]
                 return  DataTable(data=match_datalength(data=ColCos2,value=input.ColCos2Len()),filters=input.ColCos2Filter())
             
             # Add Columns Cos2 Modal Show
             @reactive.Effect
             @reactive.event(input.ColCos2GraphBtn)
             def _():
-                GraphModalShow(text="Col",name="Cos2")
+                GraphModalShow(text="Col",name="Cos2",max_axis=nbDim)
 
             # Reactive Graph
             @reactive.Calc
@@ -713,39 +687,34 @@ class CAshiny(BaseEstimator,TransformerMixin):
             def ColCos2Plot():
                 return ColCos2Map().draw()
             
-            #-----------------------------------------------------------------------------
-            # Add Columns Cosinus Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.ColCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Col",name="Cos2",title=None)
-        
-            @reactive.Calc
-            def ColCos2CorrMap():
-                fig = fviz_corrplot(X=model.col_["cos2"],
-                                    title=input.ColCos2CorrTitle(),
-                                    outline_color=input.ColCos2CorrColor(),
-                                    x_label="Columns",
-                                    colors=[input.ColCos2CorrLowColor(),
-                                            input.ColCos2CorrMidColor(),
-                                            input.ColCos2CorrHightColor()
-                                            ],
-                                    ggtheme=pn.theme_gray())
-                return fig
-
-            # Plot Columns Cos2/Correlations plot
-            @output
-            @render.plot(alt="Columns Cosinus/Correlations Map - CA")
-            def ColCos2CorrPlot():
-                return ColCos2CorrMap().draw()
-
             #---------------------------------------------------------------------------------
             ## Supplementary Columns
+            #------------------------------------------------------------------------------------
+            # Add supplementary Columns Conditional Panel
             @output
+            @render.ui
+            def ColSupPanel():
+                return ui.panel_conditional("input.choice == 'ColSupRes'",
+                            ui.br(),
+                            ui.h5("Coordonnées"),
+                            PanelConditional1(text="ColSup",name="Coord"),
+                            ui.hr(),
+                            ui.h5("Cos2 - Qualité de la représentation"),
+                            PanelConditional1(text="ColSup",name="Cos2") 
+                        )
+            # Supplementary columns coordinates
             @render.data_frame
             def ColSupCoordTable():
-                ColSupCoord = model.col_sup_["coord"].round(4).reset_index().rename(columns={"index" : "Columns"})
+                ColSupCoord = model.col_sup_["coord"].round(4).reset_index()
+                ColSupCoord.columns = ["Columns", *ColSupCoord.columns[1:]]
                 return DataTable(data=match_datalength(data=ColSupCoord,value=input.ColSupCoordLen()),filters=input.ColSupCoordFilter())
+            
+            # Supplementary columns Cos2
+            @render.data_frame
+            def ColSupCos2Table():
+                ColSupCos2 = model.col_sup_["cos2"].round(4).reset_index()
+                ColSupCos2.columns = ["Columns", *ColSupCos2.columns[1:]]
+                return DataTable(data=match_datalength(data=ColSupCos2,value=input.ColSupCos2Len()),filters=input.ColSupCos2Filter())
 
             ############################################################################################
             #       Row Points Informations
@@ -753,36 +722,36 @@ class CAshiny(BaseEstimator,TransformerMixin):
 
             #---------------------------------------------------------------------------------------------
             # Rows Coordinates
-            @output
             @render.data_frame
             def RowCoordTable():
                 RowCoord = model.row_["coord"].round(4).reset_index()
+                RowCoord.columns = ["Rows", *RowCoord.columns[1:]]
                 return DataTable(data = match_datalength(RowCoord,input.RowCoordLen()),filters=input.RowCoordFilter())
             
             #-------------------------------------------------------------------------------------------------
             # Rows Contributions
-            @output
             @render.data_frame
             def RowContribTable():
                 RowContrib = model.row_["contrib"].round(4).reset_index()
+                RowContrib.columns = ["Rows", *RowContrib.columns[1:]]
                 return  DataTable(data=match_datalength(RowContrib,input.RowContribLen()),filters=input.RowContribFilter())
             
             # Add rows Contributions Modal Show
             @reactive.Effect
             @reactive.event(input.RowContribGraphBtn)
             def _():
-                GraphModalShow(text="Row",name="Contrib")
+                GraphModalShow(text="Row",name="Contrib",max_axis=nbDim)
 
             # Plot Rows Contributions
             @reactive.Calc
             def RowContribMap():
                 fig = fviz_contrib(self=model,
-                                choice="row",
-                                axis=input.RowContribAxis(),
-                                top_contrib=int(input.RowContribTop()),
-                                color = input.RowContribColor(),
-                                bar_width= input.RowContribBarWidth(),
-                                ggtheme=pn.theme_gray())
+                                   choice="row",
+                                   axis=input.RowContribAxis(),
+                                   top_contrib=int(input.RowContribTop()),
+                                   color = input.RowContribColor(),
+                                   bar_width= input.RowContribBarWidth(),
+                                   ggtheme=pn.theme_gray())
                 return fig
 
             @output
@@ -790,44 +759,19 @@ class CAshiny(BaseEstimator,TransformerMixin):
             def RowContribPlot():
                 return RowContribMap().draw()
             
-            # Add Rows Contributions/Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.RowContribCorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Row",name="Contrib",title=None)
-
-            # Plot Row Contributions
-            @reactive.Calc
-            def RowContribCorrMap():
-                fig = fviz_corrplot(X=model.row_["contrib"],
-                                    title=input.RowContribCorrTitle(),
-                                    x_label="Rows",
-                                    outline_color=input.RowContribCorrColor(),
-                                    colors=[input.RowContribCorrLowColor(),
-                                            input.RowContribCorrMidColor(),
-                                            input.RowContribCorrHightColor()
-                                            ],
-                                    ggtheme=pn.theme_gray())
-                return fig
-
-            @output
-            @render.plot(alt="Rows Contributions/Correlations Map - PCA")
-            def RowContribCorrPlot():
-                return RowContribCorrMap().draw()
-            
             #----------------------------------------------------------------------------------------------------
-            # Rows Cos2 
-            @output
+            # Rows Cos2
             @render.data_frame
             def RowCos2Table():
                 RowCos2 = model.row_["cos2"].round(4).reset_index()
+                RowCos2.columns = ["Rows", *RowCos2.columns[1:]]
                 return  DataTable(data = match_datalength(RowCos2,input.RowCos2Len()),filters=input.RowCos2Filter())
             
             # Add Rows Cos2 Modal Show
             @reactive.Effect
             @reactive.event(input.RowCos2GraphBtn)
             def _():
-                GraphModalShow(text="Row",name="Cos2")
+                GraphModalShow(text="Row",name="Cos2",max_axis=nbDim)
 
             # Plot Rows Cos2
             @reactive.Calc
@@ -845,40 +789,102 @@ class CAshiny(BaseEstimator,TransformerMixin):
             @render.plot(alt="Rows Cosines Map - CA")
             def RowCos2Plot():
                 return RowCos2Map().draw()
-                
-            # Add Columns Cosines/Correlation Modal Show
-            @reactive.Effect
-            @reactive.event(input.RowCos2CorrGraphBtn)
-            def _():
-                GraphModelModal2(text="Row",name="Cos2",title=None)
-
-            # Plot Rows Contributions
-            @reactive.Calc
-            def RowCos2CorrMap():
-                fig = fviz_corrplot(X=model.row_["cos2"],
-                                    title=input.RowCos2CorrTitle(),
-                                    x_label="Rows",
-                                    outline_color=input.RowCos2CorrColor(),
-                                    colors=[input.RowCos2CorrLowColor(),
-                                            input.RowCos2CorrMidColor(),
-                                            input.RowCos2CorrHightColor()
-                                        ],
-                                    ggtheme=pn.theme_gray())
-                return fig
-
-            @output
-            @render.plot(alt="Rows Cosinus/Correlations Map - CA")
-            def RowCos2CorrPlot():
-                return RowCos2CorrMap().draw()
             
             #----------------------------------------------------------------------------
             # Supplementary Rows Coordinates
-            @output
             @render.data_frame
             def RowSupCoordTable():
                 RowSupCoord = model.row_sup_["coord"].round(4).reset_index()
+                RowSupCoord.columns = ["Rows", *RowSupCoord.columns[1:]]
                 return  DataTable(data = match_datalength(RowSupCoord,input.RowSupCoordLen()),filters=input.RowSupCoordFilter())
             
+            # Supplementary Rows Cos2
+            @render.data_frame
+            def RowSupCos2Table():
+                RowSupCos2 = model.row_sup_["cos2"].round(4).reset_index()
+                RowSupCos2.columns = ["Rows", *RowSupCos2.columns[1:]]
+                return  DataTable(data = match_datalength(RowSupCos2,input.RowSupCos2Len()),filters=input.RowSupCos2Filter())
+            
+            ##############################################################################################################
+            ## Supplementary quantitatives variables informations
+            ##------------------------------------------------------------------------------------------------------------
+            # Add supplementary continuous/quantitatives Conditional Panel
+            @output
+            @render.ui
+            def QuantiSupPanel():
+                return ui.panel_conditional("input.choice == 'QuantiSupRes'",
+                            ui.br(),
+                            ui.h5("Coordonnées"),
+                            PanelConditional1(text="QuantiSup",name="Coord"),
+                            ui.hr(),
+                            ui.h5("Cos2 - Qualité de la représentation"),
+                            PanelConditional1(text="QuantiSup",name="Cos2")                   
+                        )
+            
+            # Supplementary quantitatives variables coordinates
+            @render.data_frame
+            def QuantiSupCoordTable():
+                QuantiSupCoord = model.quanti_sup_["coord"].round(4).reset_index()
+                QuantiSupCoord.columns = ["Variables", *QuantiSupCoord.columns[1:]]
+                return  DataTable(data = match_datalength(QuantiSupCoord,input.QuantiSupCoordLen()),filters=input.QuantiSupCoordFilter())
+            
+            # Supplementary quantitatives variables cos2
+            @render.data_frame
+            def QuantiSupCos2Table():
+                QuantiSupCos2 = model.quanti_sup_["cos2"].round(4).reset_index()
+                QuantiSupCos2.columns = ["Variables", *QuantiSupCos2.columns[1:]]
+                return  DataTable(data = match_datalength(QuantiSupCos2,input.QuantiSupCos2Len()),filters=input.QuantiSupCos2Filter())
+            
+            #########################################################################################
+            ## Supplementary qualitatives variables informations
+            ##---------------------------------------------------------------------------------------
+            # Add supplementary qualitatives Conditional Panel
+            @output
+            @render.ui
+            def QualiSupPanel():
+                return ui.panel_conditional("input.choice == 'QualiSupRes'",
+                            ui.br(),
+                            ui.h5("Coordonnées"),
+                            PanelConditional1(text="QualiSup",name="Coord"),
+                            ui.hr(),
+                            ui.h5("Cos2 - Qualité de la représentation"),
+                            PanelConditional1(text="QualiSup",name="Cos2"),
+                            ui.hr(),
+                            ui.h5("V-test"),
+                            PanelConditional1(text="QualiSup",name="Vtest"),
+                            ui.hr(),
+                            ui.h5("Eta2 - Rapport de corrélation"),
+                            PanelConditional1(text="QualiSup",name="Eta2"),               
+                        )
+
+            # Supplementary qualitatives coordinates
+            @render.data_frame
+            def QualiSupCoordTable():
+                QualiSupCoord = model.quali_sup_["coord"].round(4).reset_index()
+                QualiSupCoord.columns = ["Categories", *QualiSupCoord.columns[1:]]
+                return  DataTable(data = match_datalength(QualiSupCoord,input.QualiSupCoordLen()),filters=input.QualiSupCoordFilter())
+            
+            # Supplementary qualitatives cos2
+            @render.data_frame
+            def QualiSupCos2Table():
+                QualiSupCos2 = model.quali_sup_["cos2"].round(4).reset_index()
+                QualiSupCos2.columns = ["Categories", *QualiSupCos2.columns[1:]]
+                return  DataTable(data = match_datalength(QualiSupCos2,input.QualiSupCos2Len()),filters=input.QualiSupCos2Filter())
+            
+            # Supplementary qualitatives v-test
+            @render.data_frame
+            def QualiSupVtestTable():
+                QualiSupVtest = model.quali_sup_["vtest"].round(4).reset_index()
+                QualiSupVtest.columns = ["Categories", *QualiSupVtest.columns[1:]]
+                return  DataTable(data = match_datalength(QualiSupVtest,input.QualiSupVtestLen()),filters=input.QualiSupVtestFilter())
+            
+            # Supplementary qualitatives Eta2
+            @render.data_frame
+            def QualiSupEta2Table():
+                QualiSupEta2 = model.quali_sup_["eta2"].round(4).reset_index()
+                QualiSupEta2.columns = ["Variables", *QualiSupEta2.columns[1:]]
+                return  DataTable(data = match_datalength(QualiSupEta2,input.QualiSupEta2Len()),filters=input.QualiSupEta2Filter())
+
             #########################################################################################
             #       Description des axes
             #########################################################################################
@@ -895,7 +901,6 @@ class CAshiny(BaseEstimator,TransformerMixin):
                     PanelConditional1(text="Col",name="Desc"),
                 )
             
-            @output
             @render.data_frame
             def RowDescTable():
                 DimDesc = dimdesc(self=model,axis=None)
@@ -907,7 +912,6 @@ class CAshiny(BaseEstimator,TransformerMixin):
                     DimDescRow = pd.DataFrame()
                 return  DataTable(data = match_datalength(DimDescRow,input.RowDescLen()),filters=input.RowDescFilter())
             
-            @output
             @render.data_frame
             def ColDescTable():
                 DimDesc = dimdesc(self=model,axis=None)
@@ -921,17 +925,25 @@ class CAshiny(BaseEstimator,TransformerMixin):
             #       Résumé du jeu de données
             ###################################################################################################
             #-----------------------------------------------------------------------------------------------
-            ### Statistiques descriptives
-            @output
+            ### Distribution conditionelle (X/Y)
             @render.data_frame
-            def ResumeDataTable():
-                StatsDesc = model.call_["X"].describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
-                return  DataTable(data = match_datalength(StatsDesc,input.ResumeDataLen()),filters=input.ResumeDataFilter())
+            def CondDistOneTable():
+                data = model.call_["X"].apply(lambda x : 100*x/np.sum(x),axis=0)
+                data.loc["Total",:] = data.sum(axis=0)
+                data = data.round(4).reset_index()
+                return DataTable(data = match_datalength(data,input.CondDistOneLen()),filters=input.CondDistOneFilter())
+            
+            ### Distribution conditionelle (Y/X)
+            @render.data_frame
+            def CondDistTwoTable():
+                data = model.call_["X"].apply(lambda x : 100*x/np.sum(x),axis=1)
+                data.loc[:,"Total"] = data.sum(axis=1)
+                data = data.round(4).reset_index()
+                return DataTable(data = match_datalength(data,input.CondDistTwoLen()),filters=input.CondDistTwoFilter())
             
             #####################################################################################################
             #---------------------------------------------------------------------------------------------------
             # Overall Data
-            @output
             @render.data_frame
             def OverallDataTable():
                 overalldata = model.call_["Xtot"].reset_index()
@@ -951,12 +963,14 @@ class CAshiny(BaseEstimator,TransformerMixin):
         
         """
 
-        app = App(ui=self.app_ui, server=self.app_server)
+        app = App(ui=self.app_ui, server=self.app_server,static_assets=Path(__file__).parent / "www")
         return app.run(**kwargs)
     
     # Run with notebooks
     def run_notebooks(self,**kwargs):
-
+        """
+        
+        """
         nest_asyncio.apply()
         uvicorn.run(self.run(**kwargs))
     
@@ -967,5 +981,3 @@ class CAshiny(BaseEstimator,TransformerMixin):
         """
         app = App(ui=self.app_ui, server=self.server)
         return app.stop()
-
-

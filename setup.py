@@ -20,7 +20,7 @@ setuptools.setup(
                       "pandas>=2.2.2",
                       "numexpr>=2.10.0",
                       "plotnine>=0.10.1",
-                      "scientisttools>=0.1.3"],
+                      "scientisttools>=0.1.5"],
     python_requires=">=3.10",
     include_package_data=True,
     package_data={"": ["data/*.xlsx",

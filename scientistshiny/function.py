@@ -82,23 +82,21 @@ def PanelConditional1(text=str,name=str):
 
 # Panel Conditional With graph
 def PanelConditional2(text=str,name=str):
+
+    if name not in ["Contrib","Cos2"]:
+        raise ValueError("'name' must be one of 'Contrib','Cos2'")
     # Set Valeu name
     if name == "Contrib":
         value_name = "Contribution"
     elif name == "Cos2":
         value_name = "Cosinus"
-    elif name == "Corr":
-        value_name = "Correlation"
-    elif name == "Vtest":
-        value_name = "Vtest"
-
+    
     panel = ui.row(
                 ui.column(2,
                     ui.h6("Paramètres"),
                     ui.input_radio_buttons(id=text+name+"Len",label="Taille d'affichage",choices={x:x for x in ["head","tail","all"]},selected="head",inline=True),
                     ui.input_switch(id=text+name+"Filter",label="Filtrer le tableau",value=False),
-                    ui.input_action_button(id=text+name+"GraphBtn",label="Graphe "+value_name,style = download_btn_style),
-                    ui.input_action_button(id=text+name+"CorrGraphBtn",label="Graphe "+name+"-corr",style=download_btn_style)
+                    ui.input_action_button(id=text+name+"GraphBtn",label="Graphe "+value_name,style = download_btn_style)
                 ),
                 ui.column(10,ui.div(ui.output_data_frame(id=text+name+"Table"),align="center"))
             )   
@@ -131,15 +129,15 @@ def match_datalength(data,value):
         
 # Return DaaFrame as DaaTable
 def DataTable(data,filters=False):
-    return render.DataTable(data,filters=filters,width="100%",selection_mode="rows")
+    return render.DataTable(data,filters=filters,selection_mode="rows")
 
 # 
-def GraphModalShow(text=str,name=str):
+def GraphModalShow(text=str,name=str,max_axis=3):
     m = ui.modal(
             ui.output_plot(id=text+name+"Plot"),
             title=ui.div(
                 ui.row(
-                    ui.column(3,ui.input_numeric(id=text+name+"Axis",label="Choix de l'axe :",min=0,max=5,value=0)),
+                    ui.column(3,ui.input_numeric(id=text+name+"Axis",label="Choix de l'axe :",min=0,max=max_axis-1,value=0)),
                     ui.column(3,ui.input_text(id=text+name+"Top",label="Top "+name,value=10,placeholder="Entrer un nombre")),
                     ui.column(3,ui.input_select(id=text+name+"Color",label="Couleur",choices={x:x for x in mcolors.CSS4_COLORS},selected="steelblue")),
                     ui.column(3,ui.input_slider(id=text+name+"BarWidth",label="Largeur des barres",min=0.1,max=1,value=0.5,step=0.1))
@@ -151,24 +149,3 @@ def GraphModalShow(text=str,name=str):
             size="l"
         )
     return ui.modal_show(m)
-    
-# Modal Show
-def GraphModelModal2(text=str,name=str,title=None):
-    m = ui.modal(
-            ui.output_plot(id=text+name+"CorrPlot"),
-            title=ui.div(
-                ui.row(
-                    ui.column(3,ui.input_text(id=text+name+"CorrTitle",label="Titre du graphique",value=title,placeholder="Entrer un titre")),
-                    ui.column(3,ui.input_select(id=text+name+"CorrColor",label="Couleur de bordure",choices={x:x for x in mcolors.CSS4_COLORS},selected="steelblue")),
-                    ui.column(2,ui.input_select(id=text+name+"CorrLowColor",label="Low",choices={x:x for x in mcolors.CSS4_COLORS},selected="blue")),
-                    ui.column(2,ui.input_select(id=text+name+"CorrMidColor",label="Medium",choices={x:x for x in mcolors.CSS4_COLORS},selected="white")),
-                    ui.column(2,ui.input_select(id=text+name+"CorrHightColor",label="High",choices={x:x for x in mcolors.CSS4_COLORS},selected="red"))
-                ),
-                class_="d-flex gap-4"
-            ),
-            easy_close=True,
-            footer=ui.download_button(id=text+name+"CorrGraphDownloadBtn",label="Download"),
-            size="l"
-        )
-    return ui.modal_show(m)
-

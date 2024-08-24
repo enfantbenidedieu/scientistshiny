@@ -7,6 +7,7 @@
 [![PyPI](https://img.shields.io/pypi/v/scientistshiny.svg?color=dark-green)](https://pypi.org/project/scientistshiny/)
 [![Downloads](https://static.pepy.tech/badge/scientistshiny)](https://pepy.tech/project/scientistshiny)
 [![Downloads](https://static.pepy.tech/badge/scientistshiny/month)](https://pepy.tech/project/scientistshiny)
+[![Downloads](https://static.pepy.tech/badge/scientistshiny/week)](https://pepy.tech/project/scientistshiny)
 </div>
 
 # scientistshiny : Perform Factorial Analysis from `scientisttools` with a Shiny for Python Application

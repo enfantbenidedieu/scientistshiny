@@ -45,11 +45,14 @@ pip install scientistshiny
 from scientisttools import PCA, load_decathlon2
 from scientistshiny import PCAshiny
 decathlon = load_decathlon2()
-# Principal Component Analysis
-res_pca = PCA(standardize=True,ind_sup=list(range(23,27)),quanti_sup=[10,11],quali_sup=12,parallelize=False)
+# PCA with scientistshiny
+res_shiny = PCAshiny(model = decathlon)
+res_shiny.run()
+
+# PCAshiny on a result of a PCA
+res_pca = PCA(ind_sup=list(range(23,27)),quanti_sup=[10,11],quali_sup=12)
 res_pca.fit(decathlon)
-# Shiny for Python Application
-res_shiny = PCAshiny(model=res_pca)
+res_shiny = PCAshiny(model = res_pca)
 res_shiny.run()
 ```
 

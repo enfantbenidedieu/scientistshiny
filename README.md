@@ -16,9 +16,22 @@
 
 scientistshiny is a Python package to easily improve multivariate Exploratory Data Analysis graphs.
 
-## 2 Installation
+## 2 Why used scientistshiny?
 
-### 2.1 Dependencies
+scientistshiny provided functions for :
+
+* Principal Component Analysis (PCA) with scientistshiny (**_PCAshiny_**)
+* Correspondence Analysis (CA) with scientistshiny (**_CAshiny_**)
+* Multiple Correspondence Analysis (MCA) with scientistshiny (**_MCAshiny_**)
+* Factor Analysis for Mixed Data (FAMD) with scientistshiny (**_FAMDshiny_**)
+* Multiple Factor Analysis (MFA) with scientistshiny (**_MFAshiny_**)
+* Multiple Factor Analysis for qualitative variables (MFAQUAL) with scientistshiny (**_MFAQUALshiny_**)
+* Multiple Factor Analysis for Mixed Data (MFAMIX) with scientistshiny (**_MFAMIXshiny_**)
+* Multiple Factor Analysis for Contingence Tables (MFACT) with scientistshiny (**_MFACTshiny_**)
+
+## 3 Installation
+
+### 3.1 Dependencies
 
 scientistshiny requires :
 
@@ -31,7 +44,7 @@ pandas>=2.2.3
 plotnine>=0.10.1
 ```
 
-### 2.2 User installation
+### 3.2 User installation
 
 You can install scientisttools using `pip` :
 
@@ -39,7 +52,7 @@ You can install scientisttools using `pip` :
 pip install scientistshiny
 ```
 
-## 3 Example with `PCAshiny`
+## 4 Example with `PCAshiny`
 
 ```python
 # Load dataset and functions
@@ -58,6 +71,6 @@ res_shiny = PCAshiny(model = res_pca)
 res_shiny.run()
 ```
 
-## 3 Author
+## 4 Author(s)
 
 Duvérier DJIFACK ZEBAZE ([djifacklab@gmail.com](djifacklab@gmail.com))

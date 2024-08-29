@@ -65,8 +65,7 @@ res_shiny = PCAshiny(model = decathlon)
 res_shiny.run()
 
 # PCAshiny on a result of a PCA
-res_pca = PCA(ind_sup=list(range(23,27)),quanti_sup=[10,11],quali_sup=12)
-res_pca.fit(decathlon)
+res_pca = PCA(ind_sup=list(range(23,27)),quanti_sup=[10,11],quali_sup=12).fit(decathlon)
 res_shiny = PCAshiny(model = res_pca)
 res_shiny.run()
 ```

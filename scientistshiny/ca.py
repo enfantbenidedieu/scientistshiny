@@ -1,35 +1,22 @@
 # -*- coding: utf-8 -*-
-from shiny import App, Inputs, Outputs, Session, render, ui, reactive, run_app
+from shiny import Inputs, Outputs, Session, render, ui, reactive
 import shinyswatch
-from pathlib import Path
 import numpy as np
 import pandas as pd
-#import patchworklib as pw
 import plotnine as pn
 import matplotlib.colors as mcolors
-import nest_asyncio
-import uvicorn
+from scientisttools import CA,fviz_ca_row,fviz_ca_col,fviz_eig, fviz_contrib,fviz_cos2, fviz_corrcircle
+from scientistshiny.base import Base
+from scientistshiny.function import *
 
-from sklearn.base import BaseEstimator, TransformerMixin
-from scientisttools import fviz_ca_row,fviz_ca_col,fviz_eig, fviz_contrib,fviz_cos2,fviz_corrplot,dimdesc
-
-from .function import *
-
-colors = mcolors.CSS4_COLORS
-colors["cos2"] = "cos2"
-colors["contrib"] = "contrib"
-
-css_path = Path(__file__).parent / "www" / "style.css"
-
-class CAshiny(BaseEstimator,TransformerMixin):
+class CAshiny(Base):
     """
     Correspondance Analysis (CA) with scientistshiny
     ------------------------------------------------
-    This class inherits from sklearn BaseEstimator and TransformerMixin class
 
     Description
     -----------
-    Performs Correspondance Analysis (PCA) including supplementary row and/or column points on a Shiny application. Graphics can be downloaded in png, jpg and pdf.
+    Performs Correspondance Analysis (CA) with supplementary elements (rows points and/or columns points and/or quantitative variables and/or qualitative variables) on a Shiny for Python application. Allows to change CA graphical parameters. Graphics can be downloaded in png, jpg and pdf.
 
     Usage
     -----
@@ -39,17 +26,15 @@ class CAshiny(BaseEstimator,TransformerMixin):
 
     Parameters
     ----------
-    `model`: an object of class CA. A CA result from scientisttools.
+    `model`: a pandas dataframe or a table with n rows and p columns, i.e a contingency table or an object of class CA (a CA result from scientisttools).
 
     Returns
     -------
     `Graphs` : a tab containing the the row and column points factor map (with supplementary columns and supplementary rows)
 
-    `Values` : a tab containing the summary of the CA performed, the eigenvalues, the results for the columns, for the rows, for the supplementary columns and for the supplementarry rows variables and the results for the categorical variables.
+    `Values` : a tab containing the eigenvalues, the results for the columns, for the rows, for the supplementary elements (rows points and/or columns points and/or quantitative variables and/or qualitative variables).
 
-    `Automatic description of axes` : a tab containing the output of the dimdesc function. This function is designed to point out the variables and the categories that are the most characteristic according to each dimension obtained by a Factor Analysis.
-
-    `Summary of dataset` : A tab containing the summary of the dataset and a boxplot and histogramm for quantitative variables.
+    `Summary of dataset` : a tab containing the summary of the dataset.
 
     `Data` : a tab containing the dataset with a nice display.
 
@@ -62,14 +47,42 @@ class CAshiny(BaseEstimator,TransformerMixin):
     Examples
     --------
     ```python
-    >>> from scientisttools import CA, load_children
+    >>> # Load dataset and functions
+    >>> import numpy as np
+    >>> from scientisttools import CA, load_housetasks, load_children
     >>> from scientistshiny import CAshiny
+    >>> 
+    >>> # CA with scientistshiny
+    >>> housetasks = load_housetasks()
+    >>> res_shiny = CAshiny(model=housetasks)
+    >>> res_shiny.run()
+    >>> 
+    >>> # CAshiny on a result of a CA
+    >>> children = load_children()
+    >>> children["group"] = ["A"]*4 + ["B"]*5 + ["C"]*5 +[np.nan]*4
+    >>> res_ca = CA(n_components=None,row_sup=list(range(14,18)),col_sup=list(range(5,8)),quali_sup=8).fit(children)
+    >>> res_shiny = CAshiny(model=res_ca)
+    >>> res_shiny.run()
     ```
 
     for jupyter notebooks
     https://stackoverflow.com/questions/74070505/how-to-run-fastapi-application-inside-jupyter
     """
     def __init__(self,model=None):
+        # Check if model is an instance of pd.DataFrame class
+        if isinstance(model,pd.DataFrame):        
+            # Check if qualitative data
+            is_quali = model.select_dtypes(exclude=np.number)
+            if is_quali.shape[1]>0:
+                for col in is_quali.columns.tolist():
+                    model[col] = model[col].astype("object")
+                quali_sup = [model.columns.tolist().index(x) for x in model.columns if x in is_quali.columns]
+            else:
+                quali_sup = None
+            
+            # Fit the CA with scientisttools
+            model = CA(quali_sup=quali_sup).fit(model)
+
         # Check if model is Correspondence Analysis (CA)
         if model.model_ != "ca":
             raise TypeError("'model' must be an object of class CA")
@@ -78,11 +91,10 @@ class CAshiny(BaseEstimator,TransformerMixin):
 
         row_text_color_choices = {"actif/sup": "actifs/supplémentaires","cos2":"Cosinus","contrib":"Contribution"}
 
-        # -----------------------------------------------------------------------------------
         # Initialise value choice
         value_choices = {"eigen_res":"Valeurs propres","col_res":"Résultats pour les colonnes","row_res":"Résultats pour les lignes"}
 
-        # R
+        # Resume choices
         resumes_choices = {"x/y":"Distributions conditionelles (X/Y)","y/x":"Distributions conditionnelles (Y/X)"}
 
         # Update check if supplementary rows
@@ -106,30 +118,21 @@ class CAshiny(BaseEstimator,TransformerMixin):
             value_choices = {**value_choices,**{"quali_sup_res":"Résultats pour les variables qualitatives supplémentaires"}}
             resumes_choices = {**resumes_choices,**{"bar_plot" : "Diagramme en barres"}}
 
-        # Dimension to return
-        nbDim = min(3,model.call_["n_components"])
-        DimDescChoice = {}
-        for i in range(nbDim):
-            DimDescChoice = {**DimDescChoice,**{"Dim."+str(i+1) : "Dimension "+str(i+1)}}
-
         # App UI
         app_ui = ui.page_fluid(
             ui.include_css(css_path),
             shinyswatch.theme.superhero(),
-            header(title="Analyse Factorielle des Correspondances",model_name="CA",background_color="#2e4053"),
+            header(title="Analyse Factorielle des Correspondances",model_name="CA"),
             ui.page_sidebar(
                 ui.sidebar(
                     ui.panel_well(
                         ui.h6("Options graphiques",style="text-align : center"),
                         ui.div(ui.h6("Axes"),style="display: inline-block;padding: 5px"),
-                        ui.div(ui.input_select(id="axis1",label="",choices={x:x for x in range(model.call_["n_components"])},selected=0,multiple=False),style="display: inline-block;"),
-                        ui.div(ui.input_select(id="axis2",label="",choices={x:x for x in range(model.call_["n_components"])},selected=1,multiple=False),style="display: inline-block;"),
+                        axes_input_select(model=model),
                         ui.br(),
                         ui.div(ui.input_select(id="fviz_choice",label="",choices=graph_choices,selected="fviz_row",multiple=False,width="100%")),
                         ui.panel_conditional("input.fviz_choice === 'fviz_row'",
                             title_input(id="row_title",value="Row points - CA"),
-                            ui.output_ui("choix_ind_mod"),
-                            ui.output_ui("point_label"),
                             text_size_input(which="row"),
                             point_select_input(id="row_point_select"),
                             ui.panel_conditional("input.row_point_select === 'cos2'",ui.div(lim_cos2(id="row_lim_cos2"),align="center")),
@@ -137,8 +140,8 @@ class CAshiny(BaseEstimator,TransformerMixin):
                             text_color_input(id="row_text_color",choices=row_text_color_choices),
                             ui.panel_conditional("input.row_text_color === 'actif/sup'",
                                 ui.input_select(id="row_text_actif_color",label="Points lignes actifs",choices={x:x for x in mcolors.CSS4_COLORS},selected="black",multiple=False,width="100%"),
-                                ui.output_ui("row_text_sup_color_choice"),
-                                ui.output_ui("row_text_quali_sup_color_choice")
+                                ui.output_ui("row_text_sup"),
+                                ui.output_ui("row_text_quali_sup")
                             ),
                             ui.panel_conditional("input.row_text_color === 'var_quant'",ui.output_ui("row_text_var_quant")),
                             ui.panel_conditional("input.row_text_color === 'var_qual'",ui.output_ui("row_text_var_qual")),
@@ -153,11 +156,11 @@ class CAshiny(BaseEstimator,TransformerMixin):
                             text_color_input(id="col_text_color",choices={"actif/sup" : "actif/supplémentaire","cos2":"Cosinus","contrib":"Contribution"}),
                             ui.panel_conditional("input.col_text_color ==='actif/sup'",
                                 ui.input_select(id="col_text_actif_color",label="Points colonnes actives",choices={x:x for x in mcolors.CSS4_COLORS},selected="black",multiple=False,width="100%"),
-                                ui.output_ui("col_text_sup_color_choice")
+                                ui.output_ui("col_text_sup")
                             ),
                             ui.input_switch(id="col_plot_repel",label="repel",value=True)
                         ),
-                        ui.output_ui("quanti_sup_panel")
+                        ui.output_ui("quanti_sup_fviz")
                     ),
                     ui.div(ui.input_action_button(id="exit",label="Quitter l'application",style='padding:5px; background-color: #fcac44;text-align:center;white-space: normal;'),align="center"),
                     width="25%"
@@ -185,17 +188,6 @@ class CAshiny(BaseEstimator,TransformerMixin):
                             )
                         ),
                         ui.output_plot("quanti_sup_plot")
-                        # ui.row(
-                        #     ui.column(
-                        #         ui.div(ui.output_plot("fviz_quanti_sup_plot",width='100%',height="600px",fill=True),align="center"),
-                        #         ui.hr(),
-                        #         ui.div(ui.h6("Téléchargement"),style="display: inline-block;padding: 5px"),
-                        #         ui.div(ui.download_button(id="download__plot_jpg",label="jpg",style = download_btn_style),style="display: inline-block;"),
-                        #         ui.div(ui.download_button(id="download_row_plot_png",label="png",style = download_btn_style),style="display: inline-block;"),
-                        #         ui.div(ui.download_button(id="download_row_plot_pdf",label="pdf",style = download_btn_style),style="display: inline-block;"),
-                        #         align="center"
-                        #     )
-                        # )
                     ),
                     ui.nav_panel("Valeurs",
                         ui.input_radio_buttons(id="value_choice",label=ui.h6("Quelles sorties voulez-vous?"),choices=value_choices,inline=True),
@@ -203,15 +195,15 @@ class CAshiny(BaseEstimator,TransformerMixin):
                         eigen_panel(),
                         ui.panel_conditional("input.value_choice === 'col_res'",
                             ui.input_radio_buttons(id="col_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","contrib":"Contributions","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
-                            ui.panel_conditional("input.col_choice === 'coord'",PanelConditional1(text="col",name="coord")),
-                            ui.panel_conditional("input.col_choice === 'contrib'",PanelConditional2(text="col",name="contrib")),
-                            ui.panel_conditional("input.col_choice === 'cos2'",PanelConditional2(text="col",name="cos2"))
+                            ui.panel_conditional("input.col_choice === 'coord'",panel_conditional1(text="col",name="coord")),
+                            ui.panel_conditional("input.col_choice === 'contrib'",panel_conditional2(text="col",name="contrib")),
+                            ui.panel_conditional("input.col_choice === 'cos2'",panel_conditional2(text="col",name="cos2"))
                         ),
                         ui.panel_conditional("input.value_choice === 'row_res'",
                             ui.input_radio_buttons(id="row_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","contrib":"Contributions","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
-                            ui.panel_conditional("input.row_choice === 'coord'",PanelConditional1(text="row",name="coord")),
-                            ui.panel_conditional("input.row_choice === 'contrib'",PanelConditional2(text="row",name="contrib")),
-                            ui.panel_conditional("input.row_choice === 'cos2'",PanelConditional2(text="row",name="cos2"))
+                            ui.panel_conditional("input.row_choice === 'coord'",panel_conditional1(text="row",name="coord")),
+                            ui.panel_conditional("input.row_choice === 'contrib'",panel_conditional2(text="row",name="contrib")),
+                            ui.panel_conditional("input.row_choice === 'cos2'",panel_conditional2(text="row",name="cos2"))
                         ),
                         ui.output_ui("row_sup_panel"),
                         ui.output_ui("col_sup_panel"),
@@ -221,22 +213,16 @@ class CAshiny(BaseEstimator,TransformerMixin):
                     ui.nav_panel("Résumé du jeu de données",
                         ui.input_radio_buttons(id="resume_choice",label=ui.h6("Quel type de distributions?"),choices=resumes_choices,selected="x/y",width="100%",inline=True),
                         ui.br(),
-                        ui.panel_conditional("input.resume_choice === 'x/y'",PanelConditional1(text="cond_dist",name="one")),
-                        ui.panel_conditional("input.resume_choice === 'y/x'",PanelConditional1(text="cond_dist",name="two")),
+                        ui.panel_conditional("input.resume_choice === 'x/y'",panel_conditional1(text="cond_dist",name="one")),
+                        ui.panel_conditional("input.resume_choice === 'y/x'",panel_conditional1(text="cond_dist",name="two")),
                         ui.output_ui("quali_sup_graph")
                     ),
-                    ui.nav_panel("Données",PanelConditional1(text="overall",name="data"))
+                    ui.nav_panel("Données",panel_conditional1(text="overall",name="data"))
                 )
             )
         )
 
         def server(input:Inputs, output:Outputs, session:Session):
-
-            # -------------------------------------------------------
-            @reactive.Effect
-            @reactive.event(input.exit)
-            async def _():
-                await session.close()
 
             #----------------------------------------------------------------------------------------------
             # Disable x and y axis
@@ -256,14 +242,14 @@ class CAshiny(BaseEstimator,TransformerMixin):
             # Add supplementary rows color choice
             if hasattr(model,"row_sup_"):
                 @render.ui
-                def row_text_sup_color_choice():
+                def row_text_sup():
                     return ui.TagList(ui.input_select(id="row_text_sup_color",label="Points lignes supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="blue",multiple=False,width="100%"))
             
             #---------------------------------------------------------------------------------------------------
             # Add supplementary qualitative columns color choice
             if hasattr(model,"quali_sup_"):
                 @render.ui
-                def row_text_quali_sup_color_choice():
+                def row_text_quali_sup():
                     return ui.TagList(ui.input_select(id="row_text_quali_sup_color",label="Modalités supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="red",multiple=False,width="100%"))
 
             #--------------------------------------------------------------------------------------------------------------
@@ -297,10 +283,27 @@ class CAshiny(BaseEstimator,TransformerMixin):
                 def _():
                     ui.update_select(id="row_text_quali_sup_color",label="Modalités supplémentaires",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.row_text_actif_color()]},selected="red")
 
+            #---------------------------------------------------------------------------------------------------------------
+            if hasattr(model,"quanti_sup_"):
+                @render.ui
+                def row_text_var_quant():
+                    quanti_sup_labels = model.quanti_sup_["coord"].index.tolist()
+                    return ui.TagList(ui.input_select(id="row_text_var_quant_color",label="Choix de la variable",choices={x:x for x in quanti_sup_labels},selected=quanti_sup_labels[0],multiple=False))
+                
+            #-------------------------------------------------------------------------------------------------
+            if hasattr(model,"quali_sup_"):
+                @render.ui
+                def row_text_var_qual():
+                    quali_sup_labels = model.quali_sup_["eta2"].index.tolist()
+                    return ui.TagList(
+                            ui.input_select(id="row_text_var_qual_color",label="Choix de la variable",choices={x:x for x in quali_sup_labels},selected=quali_sup_labels[0],multiple=False,width="100%"),
+                            ui.input_switch(id="row_text_add_ellipse",label="Trace les ellipses de confiance autour des modalités",value=False)
+                        )
+            
             #-----------------------------------------------------------------------------------------------
             if hasattr(model,"col_sup_"):
                 @render.ui
-                def col_text_sup_color_choice():
+                def col_text_sup():
                     return ui.TagList(ui.input_select(id="col_text_sup_color",label="Points colonnes supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="blue",multiple=False,width="100%"))
 
                 # Disable actifs and supplementary columns colors
@@ -355,6 +358,30 @@ class CAshiny(BaseEstimator,TransformerMixin):
                     fig = fviz_ca_row(self=model,
                                       axis=[int(input.axis1()),int(input.axis2())],
                                       color=input.row_text_color(),
+                                      row_sup=row_sup,
+                                      quali_sup=quali_sup,
+                                      text_size = input.row_text_size(),
+                                      lim_contrib =input.row_lim_contrib(),
+                                      lim_cos2 = input.row_lim_cos2(),
+                                      title = input.row_title(),
+                                      repel=input.row_plot_repel())
+                elif input.row_text_color() == "var_quant":
+                    fig = fviz_ca_row(self=model,
+                                      axis=[int(input.axis1()),int(input.axis2())],
+                                      color=input.row_text_var_quant_color(),
+                                      row_sup=row_sup,
+                                      quali_sup=quali_sup,
+                                      text_size = input.row_text_size(),
+                                      lim_contrib =input.row_lim_contrib(),
+                                      lim_cos2 = input.row_lim_cos2(),
+                                      title = input.row_title(),
+                                      legend_title=input.row_text_var_quant_color(),
+                                      repel=input.row_plot_repel())
+                elif input.row_text_color() == "var_qual":
+                    fig = fviz_ca_row(self=model,
+                                      axis=[int(input.axis1()),int(input.axis2())],
+                                      habillage=input.row_text_var_qual_color(),
+                                      add_ellipses=input.row_text_add_ellipse(),
                                       row_sup=row_sup,
                                       quali_sup=quali_sup,
                                       text_size = input.row_text_size(),
@@ -417,7 +444,42 @@ class CAshiny(BaseEstimator,TransformerMixin):
             @render.plot(alt="Columns Factor Map - CA")
             def fviz_col_plot():
                 return plot_col().draw()
+            
+            #-------------------------------------------------------------------------------------------------
+            ##   Supplementary quantitative variables
+            #-------------------------------------------------------------------------------------------------
+            if hasattr(model,"quanti_sup_"):
+                @render.ui
+                def quanti_sup_fviz():
+                    return ui.panel_conditional("input.fviz_choice === 'fviz_quanti_sup'",
+                            title_input(id="quanti_sup_title",value="Correlation circle - MCA"),
+                            text_size_input(which="quanti_sup"),
+                            ui.input_select(id="quanti_sup_color",label="Variables quantitatives supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="red",multiple=False,width="100%")
+                        )
+            
+                @render.ui
+                def quanti_sup_plot():
+                    return ui.TagList(
+                            ui.column(6,
+                                ui.div(ui.output_plot("fviz_quanti_sup_plot",width='100%', height='500px'),align="center"),
+                                ui.hr(),
+                                ui.div(ui.h6("Téléchargement"),style="display: inline-block;padding: 5px",align="center"),
+                                ui.div(ui.download_button(id="download_quanti_sup_plot_jpg",label="jpg",style = download_btn_style),style="display: inline-block;",align="center"),
+                                ui.div(ui.download_button(id="download_quanti_sup_plot_png",label="png",style = download_btn_style),style="display: inline-block;",align="center"),
+                                ui.div(ui.download_button(id="download_quanti_sup_plot_pdf",label="pdf",style = download_btn_style),style="display: inline-block;",align="center"),
+                                align="center"
+                            )
+                        )
 
+                @reactive.Calc
+                def plot_quanti_sup():
+                    fig =  fviz_corrcircle(self=model,axis=[int(input.axis1()),int(input.axis2())],color=input.quanti_sup_color(),title=input.quanti_sup_title(),text_size=input.quanti_sup_text_size(),ggtheme=pn.theme_gray())
+                    return fig 
+                
+                @render.plot(alt="Correlation circle - MCA")
+                def fviz_quanti_sup_plot():
+                    return plot_quanti_sup().draw()
+            
             #-------------------------------------------------------------------------------------------
             ## Eigenvalue informations
             #-------------------------------------------------------------------------------------------
@@ -459,7 +521,7 @@ class CAshiny(BaseEstimator,TransformerMixin):
             @reactive.Effect
             @reactive.event(input.col_contrib_graph_btn)
             def _():
-                GraphModalShow(text="col",name="contrib",max_axis=nbDim)
+                graph_modal_show(text="col",name="contrib",max_axis=model.call_["n_components"])
 
             # Reactive Columns Contributions Map
             @reactive.Calc
@@ -483,7 +545,7 @@ class CAshiny(BaseEstimator,TransformerMixin):
             @reactive.Effect
             @reactive.event(input.col_cos2_graph_btn)
             def _():
-                GraphModalShow(text="col",name="cos2",max_axis=nbDim)
+                graph_modal_show(text="col",name="cos2",max_axis=model.call_["n_components"])
 
             # Reactive Graph
             @reactive.Calc
@@ -504,8 +566,8 @@ class CAshiny(BaseEstimator,TransformerMixin):
                 def col_sup_panel():
                     return ui.panel_conditional("input.value_choice == 'col_sup_res'",
                                 ui.input_radio_buttons(id="col_sup_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
-                                ui.panel_conditional("input.col_sup_choice === 'coord'",PanelConditional1(text="col_sup",name="coord")),
-                                ui.panel_conditional("input.col_sup_choice === 'cos2'",PanelConditional1(text="col_sup",name="cos2"))
+                                ui.panel_conditional("input.col_sup_choice === 'coord'",panel_conditional1(text="col_sup",name="coord")),
+                                ui.panel_conditional("input.col_sup_choice === 'cos2'",panel_conditional1(text="col_sup",name="cos2"))
                             )
             
                 # Supplementary columns coordinates
@@ -523,15 +585,15 @@ class CAshiny(BaseEstimator,TransformerMixin):
                     return DataTable(data=match_datalength(data=col_sup_cos2,value=input.col_sup_cos2_len()),filters=input.col_sup_cos2_filter())
             
             #---------------------------------------------------------------------------------
-            ## Supplementary Continuous Variables
+            ## Supplementary quantitative Variables
             #---------------------------------------------------------------------------------
             if hasattr(model,"quanti_sup_"):
                 @render.ui
                 def quanti_sup_panel():
                     return ui.panel_conditional("input.value_choice == 'quanti_sup_res'",
                                 ui.input_radio_buttons(id="quanti_sup_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
-                                ui.panel_conditional("input.quanti_sup_choice === 'coord'",PanelConditional1(text="quanti_sup",name="coord")),
-                                ui.panel_conditional("input.quanti_sup_choice === 'cos2'",PanelConditional1(text="quanti_sup",name="cos2"))
+                                ui.panel_conditional("input.quanti_sup_choice === 'coord'",panel_conditional1(text="quanti_sup",name="coord")),
+                                ui.panel_conditional("input.quanti_sup_choice === 'cos2'",panel_conditional1(text="quanti_sup",name="cos2"))
                             )
                 
                 # Factor coordinates
@@ -549,17 +611,17 @@ class CAshiny(BaseEstimator,TransformerMixin):
                     return DataTable(data=match_datalength(data=quanti_sup_cos2,value=input.quanti_sup_cos2_len()),filters=input.quanti_sup_cos2_filter())
             
             #------------------------------------------------------------------------------------------
-            ## Supplementary qualitatives variables
+            ## Supplementary qualitative variables
             #-----------------------------------------------------------------------------------------
             if hasattr(model,"quali_sup_"):
                 @render.ui
                 def quali_sup_panel():
                     return ui.panel_conditional("input.value_choice == 'quali_sup_res'",
                                 ui.input_radio_buttons(id="quali_sup_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","cos2":"Cos2 - Qualité de la représentation","vtest":"Value-test","eta2" : "Eta2 - Rapport de corrélation"},selected="coord",width="100%",inline=True),
-                                ui.panel_conditional("input.quali_sup_choice === 'coord'",PanelConditional1(text="quali_sup",name="coord")),
-                                ui.panel_conditional("input.quali_sup_choice === 'cos2'",PanelConditional1(text="quali_sup",name="cos2")),
-                                ui.panel_conditional("input.quali_sup_choice === 'vtest'",PanelConditional1(text="quali_sup",name="vtest")),
-                                ui.panel_conditional("input.quali_sup_choice === 'eta2'",PanelConditional1(text="quali_sup",name="eta2"))
+                                ui.panel_conditional("input.quali_sup_choice === 'coord'",panel_conditional1(text="quali_sup",name="coord")),
+                                ui.panel_conditional("input.quali_sup_choice === 'cos2'",panel_conditional1(text="quali_sup",name="cos2")),
+                                ui.panel_conditional("input.quali_sup_choice === 'vtest'",panel_conditional1(text="quali_sup",name="vtest")),
+                                ui.panel_conditional("input.quali_sup_choice === 'eta2'",panel_conditional1(text="quali_sup",name="eta2"))
                             )
                 
                 # Factor coordinates
@@ -611,7 +673,7 @@ class CAshiny(BaseEstimator,TransformerMixin):
             @reactive.Effect
             @reactive.event(input.row_contrib_graph_btn)
             def _():
-                GraphModalShow(text="row",name="contrib",max_axis=nbDim)
+                graph_modal_show(text="row",name="contrib",max_axis=model.call_["n_components"])
 
             # Plot Rows Contributions
             @reactive.Calc
@@ -634,7 +696,7 @@ class CAshiny(BaseEstimator,TransformerMixin):
             @reactive.Effect
             @reactive.event(input.row_cos2_graph_btn)
             def _():
-                GraphModalShow(text="row",name="cos2",max_axis=nbDim)
+                graph_modal_show(text="row",name="cos2",max_axis=model.call_["n_components"])
 
             # Plot Rows Cos2
             @reactive.Calc
@@ -652,10 +714,10 @@ class CAshiny(BaseEstimator,TransformerMixin):
             if hasattr(model,"row_sup_"):
                 @render.ui
                 def row_sup_panel():
-                    return ui.panel_conditional("input.choice == 'row_sup_res'",
+                    return ui.panel_conditional("input.value_choice == 'row_sup_res'",
                                 ui.input_radio_buttons(id="row_sup_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
-                                ui.panel_conditional("input.row_sup_choice === 'coord'",PanelConditional1(text="row_sup",name="coord")),
-                                ui.panel_conditional("input.row_sup_choice === 'cos2'",PanelConditional1(text="row_sup",name="cos2"))
+                                ui.panel_conditional("input.row_sup_choice === 'coord'",panel_conditional1(text="row_sup",name="coord")),
+                                ui.panel_conditional("input.row_sup_choice === 'cos2'",panel_conditional1(text="row_sup",name="cos2"))
                             )
 
                 # Factor coordinates
@@ -697,12 +759,13 @@ class CAshiny(BaseEstimator,TransformerMixin):
                 pass
             
             if hasattr(model,"quali_sup_"):
+                quali_sup_labels = model.quali_sup_["eta2"].index.tolist()
                 @render.ui
                 def quali_sup_graph():
                     return ui.panel_conditional("input.resume_choice === 'bar_plot'",
                             ui.row(
                                 ui.column(2,
-                                    ui.input_select(id="quali_var_sup_label",label=ui.h6("Choisir une variable"),choices={x:x for x in model.quali_sup_["eta2"].index},selected=model.quali_sup_["eta2"].index[0])
+                                    ui.input_select(id="quali_sup_label",label=ui.h6("Choisir une variable"),choices={x:x for x in quali_sup_labels},selected=quali_sup_labels[0])
                                 ),
                                 ui.column(10,
                                     ui.div(ui.output_plot(id="fviz_bar_plot",width='100%',height='500px'),align="center"),
@@ -715,14 +778,18 @@ class CAshiny(BaseEstimator,TransformerMixin):
                                 )
                             )
                         )
+                
+                @reactive.Calc
+                def plot_bar():
+                    data = model.call_["Xtot"].loc[:,quali_sup_labels].astype("object")
+                    if hasattr(model,"row_sup_"):
+                        data = data.drop(index=model.call_["row_sup"])
+                    return pn.ggplot(data,pn.aes(x=input.quali_sup_label()))+ pn.geom_bar(color="black",fill="gray")
 
                 # Diagramme en barres
                 @render.plot(alt="Bar-Plot")
                 def fviz_bar_plot():
-                    data = model.call_["Xtot"].loc[:,model.quali_sup_["eta2"].index.tolist()].astype("object")
-                    if model.row_sup is not None:
-                        data = data.drop(index=model.call_["row_sup"])
-                    return (pn.ggplot(data,pn.aes(x=input.quali_var_sup_label()))+ pn.geom_bar()).draw()
+                    return plot_bar().draw()
 
             #---------------------------------------------------------------------------------------------------
             ## Overall Data
@@ -731,36 +798,14 @@ class CAshiny(BaseEstimator,TransformerMixin):
             def overall_data_table():
                 overall_data = model.call_["Xtot"].reset_index()
                 return DataTable(data = match_datalength(overall_data,input.overall_data_len()),filters=input.overall_data_filter())
+            
+            #-----------------------------------------------------------------------------------------------------------------------
+            ## Close the session
+            #------------------------------------------------------------------------------------------------------------------------
+            @reactive.Effect
+            @reactive.event(input.exit)
+            async def _():
+                await session.close()
 
         self.app_ui = app_ui
         self.app_server = server
-
-    def run(self,**kwargs):
-        """
-        Run the app
-        -----------
-
-        Parameters
-        ----------
-        kwargs : objet = {}. See https://shiny.posit.co/py/api/App.html
-        """
-        app = App(ui=self.app_ui, server=self.app_server)
-        return run_app(app=app,launch_browser=True,**kwargs)
-    
-    # Run with notebooks
-    def run_notebooks(self,**kwargs):
-        """
-        Run the app on jupiter notebooks
-        --------------------------------
-        """
-        nest_asyncio.apply()
-        uvicorn.run(self.run(**kwargs))
-    
-    # Stop App
-    def stop(self):
-        """
-        Stop the app
-        ------------
-        """
-        app = App(ui=self.app_ui, server=self.app_server)
-        return app.stop()

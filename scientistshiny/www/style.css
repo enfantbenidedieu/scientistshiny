@@ -1,9 +1,12 @@
 * {
-    font-family: "Bookman Old Style", sans-serif !important;
+    font-family: "Cambria", sans-serif !important;
     font: size 11px;
   }
 
 /* Change header text to imported font */
+h2{
+    text-align: center;
+}
 
 h5{
     font-weight: bold;
@@ -16,18 +19,4 @@ h6{
     color : black;
     text-align:left;
     font-weight: bold;
-}
-
-body-title{
-    text-align : center
-}
-
-.navbar_id {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-nav_panel{
-    background-color: gray;
 }

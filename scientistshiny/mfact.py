@@ -4,40 +4,41 @@ import shinyswatch
 import numpy as np
 import plotnine as pn
 import matplotlib.colors as mcolors
+from pathlib import Path
 from sklearn.cluster import KMeans
-from scientisttools import fviz_mfa_ind,fviz_mfa_var,fviz_mfa_group,fviz_mfa_axes,fviz_eig,fviz_contrib,fviz_cos2,dimdesc
+from scientisttools import fviz_mfa_ind,fviz_mfa_freq,fviz_mfa_group,fviz_mfa_axes,fviz_eig,fviz_contrib,fviz_cos2,dimdesc
 from scientistshiny.base import Base
 from scientistshiny.function import *
 
 
-class MFAshiny(Base):
+class MFACTshiny(Base):
     """
-    Multiple Factor Analysis (MFA) with scientistshiny
-    --------------------------------------------------
+    Multiple Factor Analysis for Contingency Tables (MFACT) with scientistshiny
+    ---------------------------------------------------------------------------
 
     Description
     -----------
-    Performs Multiple Factor Analysis (MFA) with supplementary individuals and supplementary groups of quantitative/qualitative/mixed variables on a Shiny for Python application. Allows to change MFA graphical parmeters. Graphics can be downloaded in png, jpg and pdf.
+    Performs Multiple Factor Analysis for Contingency Tables (MFACT) with supplementary individuals and supplementary contingency tables on a Shiny for Python application. Allows to change MFACT graphical parmeters. Graphics can be downloaded in png, jpg and pdf.
 
     Usage
     -----
     ```python
-    >>> MFAshiny(model)
+    >>> MFACTshiny(model)
     ```
 
     Parameters
     ----------
-    `model`: an object of class MFA. A MFA result from scientisttools.
+    `model`: an object of class MFACT. A MFACT result from scientisttools.
 
     Returns
     -------
-    `Graphs` : a tab containing the individuals factor map, the correlation circle for quantitative variables, the groups factor map and the axes factor map.
+    `Graphs` : a tab containing the individuals factor map, the frequency factor map, the groups factor map and the axes factor map.
 
-    `Values` : a tab containing the eigenvalue, the results for the quantitative variables, the results for the individuals, the results for the groups, the results for the partiels axis, the results for the supplementary elements (individuals, quantitative variables, qualitative variables and groups).
+    `Values` : a tab containing the eigenvalue, the results for the frequency, the results for the individuals, the results for the groups, the results for the partiels axis, the results for the supplementary elements (individuals, frequences and groups).
 
     `Automatic description of axes` : a tab containing the output of the dimdesc function. This function is designed to point out the variables and the categories that are the most characteristic according to each dimension obtained by a Factor Analysis.
 
-    `Summary of dataset` : a tab containing the summary of the dataset : descriptive statistics, histogram and Pearson correlation matrix, bar plot if supplementary qualitative variables.
+    `Summary of dataset` : a tab containing the summary of the dataset : descriptive statistics.
 
     `Data` : a tab containing the dataset with a nice display.
 
@@ -50,53 +51,37 @@ class MFAshiny(Base):
     Examples
     --------
     ```python
-    >>> # Load wine dataset
-    >>> from scientisttools import MFA, load_wine
-    >>> wine = load_wine()
-    >>> group_name = ["origin","odor","visual","odor.after.shaking","taste","overall"]
-    >>> group = [2,5,3,10,9,2]
-    >>> num_group_sup = [0,5]
-    >>> group_type = ["n"]+["s"]*5
-    >>> res_mfa = MFA(n_components=5,group=group,group_type=group_type,var_weights_mfa=None,name_group = group_name,num_group_sup=[0,5],parallelize=True).fit(wine)
-    >>> from scientistshiny import MFAshiny
-    >>> app = MFAshiny(model=res_mfa)
-    >>> app.run()
+    >>> # Load mortality dataset
+    >>> import pandas as pd
+    >>> from scientisttools import MFACT, load_mortality
+    >>> from scientistshiny import MFACTshiny
+    >>> mortality = load_mortality()
+    >>> mortality2 = mortality.copy()
+    >>> mortality2.columns = [x + "-2" for x in mortality2.columns]
+    >>> dat = pd.concat((mortality,mortality2),axis=1)
+    >>> res_mfact = MFACT(group=[9]*4,name_group=["1979","2006","1979-2","2006-2"],num_group_sup=[2,3],ind_sup=list(range(50,dat.shape[0])),parallelize=True).fit(dat)
+    >>> res_shiny = MFACTshiny(model=res_mfact)
+    >>> res_shiny.run()
     ```
     
     for jupyter notebooks
     https://stackoverflow.com/questions/74070505/how-to-run-fastapi-application-inside-jupyter
     """
     def __init__(self,model=None):
-        # Check if model is Multiple Factor Analysis (MFA)
-        if model.model_ != "mfa":
-            raise TypeError("'model' must be an object of class MFA")
-        
-        # Individuals test color
-        ind_text_color_choices = {"actif/sup":"actifs/supplémentaires","cos2":"Cosinus","contrib":"Contribution","kmeans":"KMeans","var_quant":"Variable quantitative"}
-
-        # resume choice
-        resume_choices = {"stats_desc":"Statistiques descriptives","hist_plot" : "Histogramme","corr_matrix": "Matrice des corrélations"}
-
-        # Quantitatives columns
-        var_labels = model.call_["X"].columns.tolist()
-            
+        # Check if model is Multiple Factor Analysis for Contingency Table (MFACT)
+        if model.model_ != "mfact":
+            raise TypeError("'model' must be an object of class MFACT")
+    
         # Initialise value choice
-        value_choice = {"eigen_res":"Valeurs propres","quanti_var_res":"Résultats pour les variables quantitatives","ind_res":"Résultats pour les individus","group_res" : "Resultats pour les groupes","axes_res": "Résultats pour les axes partiels"}
+        value_choice = {"eigen_res":"Valeurs propres","freq_res":"Résultats pour les frequences","ind_res":"Résultats pour les individus","group_res" : "Resultats pour les groupes","axes_res": "Résultats pour les axes partiels"}
 
         # Check if supplementary individuals
         if hasattr(model, "ind_sup_"):
             value_choice.update({"ind_sup_res" : "Résultats pour les individus supplémentaires"})
         
         # Check if supplementary quantitatives variables
-        if hasattr(model, "quanti_var_sup_"):
-            value_choice.update({"quanti_var_sup_res" : "Résultats pour les variables quantitatives supplémentaires"})
-            var_labels = [*var_labels,*model.quanti_var_sup_["coord"].index.tolist()]
-        
-        # Check if supplementary qualitatives variables
-        if hasattr(model, "quali_var_sup_"):
-            value_choice.update({"quali_var_sup_res" : "Résultats pour les variables qualitatives supplémentaires"})
-            ind_text_color_choices.update({"var_qual":"Variable qualitative"})
-            resume_choices.update({"bar_plot":"Diagramme en barres"})
+        if hasattr(model, "freq_sup_"):
+            value_choice.update({"freq_sup_res" : "Résultats pour les frequences supplémentaires"})
         
         # Add supplementary group radio buttons
         if model.num_group_sup is not None:
@@ -106,7 +91,7 @@ class MFAshiny(Base):
         app_ui = ui.page_fluid(
             ui.include_css(css_path),
             shinyswatch.theme.superhero(),
-            header(title="Analyse Factorielle Multiple",model_name="MFA"),
+            header(title="Analyse Factorielle Multiple pour tableaux binaires",model_name="MFACT"),
             ui.page_sidebar(
                 ui.sidebar(
                     ui.panel_well(
@@ -114,39 +99,36 @@ class MFAshiny(Base):
                         ui.div(ui.h6("Axes"),style="display: inline-block;padding: 5px"),
                         axes_input_select(model=model),
                         ui.br(),
-                        ui.div(ui.input_select(id="fviz_choice",label="Quel graphe voule-vous modifier?",choices={"fviz_ind":"Individus","fviz_var":"Variables quantitatives","fviz_group": "Groupes","fviz_axes":"Axes partiels"},selected="fviz_ind",multiple=False,width="100%")),
+                        ui.div(ui.input_select(id="fviz_choice",label="Quel graphe voule-vous modifier?",choices={"fviz_ind":"Individus","fviz_freq":"Fréquences","fviz_group": "Groupes","fviz_axes":"Axes partiels"},selected="fviz_ind",multiple=False,width="100%")),
                         ui.panel_conditional("input.fviz_choice ==='fviz_ind'",
-                            title_input(id="ind_title",value="Individuals - MFA"),
+                            title_input(id="ind_title",value="Individuals - MFACT"),
                             text_size_input(which="ind"),
                             point_select_input(id="ind_point_select"),
                             ui.panel_conditional("input.ind_point_select === 'cos2'",ui.div(lim_cos2(id="ind_lim_cos2"),align="center")),
                             ui.panel_conditional("input.ind_point_select === 'contrib'",ui.div(lim_contrib(id="ind_lim_contrib"),align="center")              ),
-                            text_color_input(id="ind_text_color",choices=ind_text_color_choices),
+                            text_color_input(id="ind_text_color",choices={"actif/sup":"actifs/supplémentaires","cos2":"Cosinus","contrib":"Contribution","kmeans":"KMeans"}),
                             ui.panel_conditional("input.ind_text_color === 'actif/sup'",
                                 ui.input_select(id="ind_text_actif_color",label="Individus actifs",choices={x:x for x in mcolors.CSS4_COLORS},selected="black",multiple=False,width="100%"),
-                                ui.output_ui("ind_text_sup"),
-                                ui.output_ui("ind_text_quali_var_sup")
+                                ui.output_ui("ind_text_sup")
                             ),
                             ui.panel_conditional("input.ind_text_color === 'kmeans'",ui.input_numeric(id="ind_text_kmeans_nb_clusters",label="Choix du nombre de clusters",value=2,min=1,max=model.ind_["coord"].shape[0],step=1,width="100%")),
-                            ui.panel_conditional("input.ind_text_color === 'var_quant'",ui.input_select(id="ind_text_var_quant_color",label="choix de la variable",choices={x:x for x in var_labels},selected=var_labels[0],width="100%")),
-                            ui.panel_conditional("input.ind_text_color === 'var_qual'",ui.output_ui("ind_text_var_qual")),
                             ui.input_switch(id="ind_plot_repel",label="repel",value=True)
                         ),
-                        ui.panel_conditional("input.fviz_choice ==='fviz_var'",
-                            title_input(id="var_title",value="Correlation circle - MFA"),
-                            text_size_input(which="var"),
-                            point_select_input(id="var_point_select"),
-                            ui.panel_conditional("input.var_point_select === 'cos2'",ui.div(lim_cos2(id="var_lim_cos2"),align="center")              ),
-                            ui.panel_conditional("input.var_point_select === 'contrib'",ui.div(lim_contrib(id="var_lim_contrib"),align="center")              ),
-                            ui.input_select(id="var_text_color",label="Colorier les flèches par :",choices={"actif/sup":"actives/supplémentaires","cos2":"Cosinus","contrib":"Contribution","group":"Groupes","kmeans":"KMeans"},selected="group",multiple=False,width="100%"),
-                            ui.panel_conditional("input.var_text_color === 'actif/sup'",
-                                ui.input_select(id="var_text_actif_color",label="Variables actives",choices={x:x for x in mcolors.CSS4_COLORS},selected="black",multiple=False,width="100%"),
-                                ui.output_ui("var_text_sup")
+                        ui.panel_conditional("input.fviz_choice ==='fviz_freq'",
+                            title_input(id="freq_title",value="Contingency tables - MFACT"),
+                            text_size_input(which="freq"),
+                            point_select_input(id="freq_point_select"),
+                            ui.panel_conditional("input.freq_point_select === 'cos2'",ui.div(lim_cos2(id="freq_lim_cos2"),align="center")              ),
+                            ui.panel_conditional("input.freq_point_select === 'contrib'",ui.div(lim_contrib(id="freq_lim_contrib"),align="center")              ),
+                            ui.input_select(id="freq_text_color",label="Colorier les flèches par :",choices={"actif/sup":"actives/supplémentaires","cos2":"Cosinus","contrib":"Contribution","group":"Groupes","kmeans":"KMeans"},selected="group",multiple=False,width="100%"),
+                            ui.panel_conditional("input.freq_text_color === 'actif/sup'",
+                                ui.input_select(id="freq_text_actif_color",label="Fréquences actives",choices={x:x for x in mcolors.CSS4_COLORS},selected="black",multiple=False,width="100%"),
+                                ui.output_ui("freq_text_sup")
                             ),
-                            ui.panel_conditional("input.var_text_color === 'kmeans'",ui.input_numeric(id="var_text_kmeans_nb_clusters",label="Choix du nombre de clusters",value=2,min=1,max=model.quanti_var_["coord"].shape[0],step=1,width="100%")),
+                            ui.panel_conditional("input.freq_text_color === 'kmeans'",ui.input_numeric(id="freq_text_kmeans_nb_clusters",label="Choix du nombre de clusters",value=2,min=1,max=model.freq_["coord"].shape[0],step=1,width="100%")),
                         ),
                         ui.panel_conditional("input.fviz_choice === 'fviz_group'",
-                            title_input(id="group_title",value="Graphe des groupes - MFA"),
+                            title_input(id="group_title",value="Graphe des groupes - MFACT"),
                             text_size_input(which="group"),
                             ui.input_select(id="group_text_color",label="Colorier les points par :",choices={"actif/sup":"actifs/supplémentaires","cos2":"Cosinus","contrib":"Contribution","kmeans":"KMeans"},selected="actif/sup",multiple=False,width="100%"),
                             ui.panel_conditional("input.group_text_color ==='actif/sup'",
@@ -157,7 +139,7 @@ class MFAshiny(Base):
                             ui.input_switch(id="group_plot_repel",label="repel",value=True)
                         ),
                         ui.panel_conditional("input.fviz_choice === 'fviz_axes'",
-                            title_input(id="axes_title",value="Graphe des axes partiels - MFA"),
+                            title_input(id="axes_title",value="Graphe des axes partiels - MFACT"),
                             text_size_input(which="axes"),
                             ui.input_select(id="axes_text_color",label="Colorier les points par :",choices={"actif/sup":"actifs/supplémentaires","group":"Groupes"},selected="group",multiple=False,width="100%"),
                             ui.panel_conditional("input.axes_text_color ==='actif/sup'",ui.input_select(id="axes_text_actif_color",label="Axes actifs/supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="black",multiple=False,width="100%"))
@@ -179,12 +161,12 @@ class MFAshiny(Base):
                                 align="center"
                             ),
                             ui.column(6,
-                                ui.div(ui.output_plot("fviz_var_plot",width='100%', height='500px'),align="center"),
+                                ui.div(ui.output_plot("fviz_freq_plot",width='100%', height='500px'),align="center"),
                                 ui.hr(),
                                 ui.div(ui.h6("Téléchargement"),style="display: inline-block;padding: 5px",align="center"),
-                                ui.div(ui.download_button(id="download_var_plot_jpg",label="jpg",style = download_btn_style),style="display: inline-block;"),
-                                ui.div(ui.download_button(id="download_var_plot_png",label="png",style = download_btn_style),style="display: inline-block;"),
-                                ui.div(ui.download_button(id="download_var_plot_pdf",label="pdf",style = download_btn_style),style="display: inline-block;"),
+                                ui.div(ui.download_button(id="download_freq_plot_jpg",label="jpg",style = download_btn_style),style="display: inline-block;"),
+                                ui.div(ui.download_button(id="download_freq_plot_png",label="png",style = download_btn_style),style="display: inline-block;"),
+                                ui.div(ui.download_button(id="download_freq_plot_pdf",label="pdf",style = download_btn_style),style="display: inline-block;"),
                                 align="center"
                             )
                         ),
@@ -214,12 +196,11 @@ class MFAshiny(Base):
                         ui.input_radio_buttons(id="value_choice",label=ui.h6("Quelles sorties voulez-vous?"),choices=value_choice,inline=True),
                         ui.br(),
                         eigen_panel(),
-                        ui.panel_conditional("input.value_choice === 'quanti_var_res'",
-                            ui.input_radio_buttons(id="var_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","contrib":"Contributions","cos2":"Cos2 - Qualité de la représentation","cor":"Corrélations"},selected="coord",width="100%",inline=True),
-                            ui.panel_conditional("input.var_choice === 'coord'",panel_conditional1(text="quanti_var",name="coord")),
-                            ui.panel_conditional("input.var_choice === 'contrib'",panel_conditional2(text="quanti_var",name="contrib")),
-                            ui.panel_conditional("input.var_choice === 'cos2'",panel_conditional2(text="quanti_var",name="cos2")),
-                            ui.panel_conditional("input.var_choice === 'cor'",panel_conditional1(text="quanti_var",name="cor"))
+                        ui.panel_conditional("input.value_choice === 'freq_res'",
+                            ui.input_radio_buttons(id="freq_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","contrib":"Contributions","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
+                            ui.panel_conditional("input.freq_choice === 'coord'",panel_conditional1(text="freq",name="coord")),
+                            ui.panel_conditional("input.freq_choice === 'contrib'",panel_conditional2(text="freq",name="contrib")),
+                            ui.panel_conditional("input.freq_choice === 'cos2'",panel_conditional2(text="freq",name="cos2"))
                         ),
                         ui.panel_conditional("input.value_choice === 'ind_res'",
                             ui.input_radio_buttons(id="ind_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","contrib":"Contributions","cos2":"Cos2 - Qualité de la représentation","partiel_inertia":"Inertie partielle","coord_partial":"Partial coordinates","within_partial_inertia":"Within partial inertia"},selected="coord",width="100%",inline=True),
@@ -247,27 +228,11 @@ class MFAshiny(Base):
                             ui.panel_conditional("input.axes_choice === 'cor_inter'",panel_conditional1(text="axes",name="cor_inter"))
                         ),
                         ui.output_ui("ind_sup_panel"),
-                        ui.output_ui("quanti_var_sup_panel"),  
-                        ui.output_ui("quali_var_sup_panel"),
+                        ui.output_ui("freq_sup_panel"),
                         ui.output_ui("group_sup_panel")
                     ),
                     dim_desc_panel(model=model),
-                    ui.nav_panel("Résumé du jeu de données",
-                        ui.input_radio_buttons(id="resume_choice",label=ui.h6("Que voulez - vous afficher?"),choices=resume_choices,selected="stats_desc",width="100%",inline=True),
-                        ui.br(),
-                        ui.panel_conditional("input.resume_choice === 'stats_desc'",panel_conditional1(text="stats",name="desc")),
-                        ui.panel_conditional("input.resume_choice === 'hist_plot'",
-                            ui.row(
-                                ui.column(2,
-                                    ui.input_select(id="var_label",label=ui.h6("Choisir une variable"),choices={x:x for x in var_labels},selected=var_labels[0]),
-                                    ui.input_switch(id="add_density",label="Densite",value=False)
-                                ),
-                                ui.column(10,ui.div(ui.output_plot(id="fviz_hist_plot",width='100%',height='500px'),align="center"))
-                            )
-                        ),
-                        ui.panel_conditional("input.resume_choice === 'corr_matrix'",panel_conditional1(text="corr",name="matrix")),
-                        ui.output_ui("quali_sup_graph")
-                    ),
+                    ui.nav_panel("Résumé du jeu de données",panel_conditional1(text="stats",name="desc")),
                     ui.nav_panel("Données",panel_conditional1(text="overall",name="data"))
                 ),
                 class_="bslib-page-dashboard",
@@ -296,27 +261,8 @@ class MFAshiny(Base):
                 def ind_text_sup():
                     return ui.TagList(ui.input_select(id="ind_text_sup_color",label="Individus supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="blue",multiple=False,width="100%"))
 
-            #--------------------------------------------------------------------------------------------------                 
-            if hasattr(model,"quali_var_sup_"):
-                @render.ui
-                def ind_text_quali_var_sup():
-                    return ui.TagList(ui.input_select(id="ind_text_quali_var_sup_color",label="Modalités supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="red",multiple=False,width="100%"))
-                
             #--------------------------------------------------------------------------------------------------------------
-            # Disable individuals colors
-            if hasattr(model,"ind_sup_") and hasattr(model,"quali_var_sup_"):
-                @reactive.Effect
-                def _():
-                    ui.update_select(id="ind_text_actif_color",label="Individus actifs",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i not in [input.ind_text_sup_color(),input.ind_text_quali_var_sup_color()]]},selected="black")
-                
-                @reactive.Effect
-                def _():
-                    ui.update_select(id="ind_text_sup_color",label="Individus supplémentaires",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i not in [input.ind_text_actif_color(),input.ind_text_quali_var_sup_color()]]},selected="blue")
-                
-                @reactive.Effect
-                def _():
-                    ui.update_select(id="ind_text_quali_var_sup_color",label="Modalités supplémentaires",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i not in [input.ind_text_actif_color(),input.ind_text_sup_color()]]},selected="red")
-            elif hasattr(model,"ind_sup_"):
+            if hasattr(model,"ind_sup_"):
                 @reactive.Effect
                 def _():
                     ui.update_select(id="ind_text_actif_color",label="Individus actifs",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.ind_text_sup_color()]},selected="black")
@@ -324,40 +270,21 @@ class MFAshiny(Base):
                 @reactive.Effect
                 def _():
                     ui.update_select(id="ind_text_sup_color",label="Individus supplémentaires",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.ind_text_actif_color()]},selected="blue")
-            elif hasattr(model,"quali_var_sup_"):
-                @reactive.Effect
-                def _():
-                    ui.update_select(id="ind_text_actif_color",label="Individus actifs",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.ind_text_quali_var_sup_color()]},selected="black")
-                
-                @reactive.Effect
-                def _():
-                    ui.update_select(id="ind_text_quali_var_sup_color",label="Modalités supplémentaires",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.ind_text_actif_color()]},selected="red")
-
-            #-------------------------------------------------------------------------------------------------
-            # Add individuals text color using supplementary qualitative variables
-            if hasattr(model,"quali_var_sup_"):
-                @render.ui
-                def ind_text_var_qual():
-                    quali_var_sup_labels = model.quali_var_sup_["eta2"].index.tolist()
-                    return ui.TagList(
-                            ui.input_select(id="ind_text_var_qual_color",label="Choix de la variable",choices={x:x for x in quali_var_sup_labels},selected=quali_var_sup_labels[0],multiple=False,width="100%"),
-                            ui.input_switch(id="ind_text_add_ellipse",label="Trace les ellipses de confiance autour des modalités",value=False)
-                        )
             
             #-----------------------------------------------------------------------------------------------
-            if hasattr(model,"quanti_var_sup_"):
+            if hasattr(model,"freq_sup_"):
                 @render.ui
-                def var_text_sup():
-                        return ui.TagList(ui.input_select(id="var_text_sup_color",label="Variables supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="red",multiple=False,width="100%"))
+                def freq_text_sup():
+                        return ui.TagList(ui.input_select(id="freq_text_sup_color",label="Fréquences supplémentaires",choices={x:x for x in mcolors.CSS4_COLORS},selected="red",multiple=False,width="100%"))
             
                 # Disable colors
                 @reactive.Effect
                 def _():
-                    ui.update_select(id="var_text_actif_color",label="Variables actives",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.var_text_sup_color()]},selected="black")
+                    ui.update_select(id="freq_text_actif_color",label="Fréquences actives",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.freq_text_sup_color()]},selected="black")
                 
                 @reactive.Effect
                 def _():
-                    ui.update_select(id="var_text_sup_color",label="Variables supplémentaires",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.var_text_actif_color()]},selected="blue")
+                    ui.update_select(id="freq_text_sup_color",label="Fréquences supplémentaires",choices={x:x for x in [i for i in mcolors.CSS4_COLORS if i != input.freq_text_actif_color()]},selected="blue")
 
             #-----------------------------------------------------------------------------------------------
             if model.num_group_sup is not None:
@@ -384,11 +311,6 @@ class MFAshiny(Base):
                     ind_sup = True
                 else:
                     ind_sup = False
-                    
-                if hasattr(model,"quali_var_sup_"):
-                    quali_sup = True
-                else:
-                    quali_sup = False
                 
                 if input.ind_text_color() == "actif/sup":
                     # Define colors for supplementary individuals
@@ -397,19 +319,12 @@ class MFAshiny(Base):
                     else:
                         color_sup = None
                     
-                    # Define colors for supplementary modalities
-                    if hasattr(model,"quali_var_sup_"):
-                        color_quali_sup = input.ind_text_quali_var_sup_color()
-                    else:
-                        color_quali_sup = None
-                    
                     fig = fviz_mfa_ind(self=model,
                                        axis=[int(input.axis1()),int(input.axis2())],
                                        color=input.ind_text_actif_color(),
                                        ind_sup=ind_sup,
+                                       quali_sup=False,
                                        color_sup = color_sup,
-                                       quali_sup=quali_sup,
-                                       color_quali_sup=color_quali_sup,
                                        text_size = input.ind_text_size(),
                                        lim_contrib =input.ind_lim_contrib(),
                                        lim_cos2 = input.ind_lim_cos2(),
@@ -420,7 +335,7 @@ class MFAshiny(Base):
                                        axis=[int(input.axis1()),int(input.axis2())],
                                        color=input.ind_text_color(),
                                        ind_sup=ind_sup,
-                                       quali_sup=quali_sup,
+                                       quali_sup=False,
                                        text_size = input.ind_text_size(),
                                        lim_contrib = input.ind_lim_contrib(),
                                        lim_cos2 = input.ind_lim_cos2(),
@@ -432,39 +347,15 @@ class MFAshiny(Base):
                                        axis = [int(input.axis1()),int(input.axis2())],
                                        color = kmeans,
                                        ind_sup = ind_sup,
-                                       quali_sup = quali_sup,
+                                       quali_sup=False,
                                        text_size = input.ind_text_size(),
                                        lim_contrib = input.ind_lim_contrib(),
                                        lim_cos2 = input.ind_lim_cos2(),
                                        title = input.ind_title(),
-                                       repel=input.ind_plot_repel())
-                elif input.ind_text_color() == "var_quant":
-                    fig = fviz_mfa_ind(self = model,
-                                       axis = [int(input.axis1()),int(input.axis2())],
-                                       color = input.ind_text_var_quant_color(),
-                                       ind_sup = ind_sup,
-                                       quali_sup = quali_sup,
-                                       text_size = input.ind_text_size(),
-                                       lim_contrib = input.ind_lim_contrib(),
-                                       lim_cos2 = input.ind_lim_cos2(),
-                                       title = input.ind_title(),
-                                       legend_title=input.ind_text_var_quant_color(),
-                                       repel = input.ind_plot_repel())
-                elif input.ind_text_color() == "var_qual":
-                    fig = fviz_mfa_ind(self = model,
-                                       axis = [int(input.axis1()),int(input.axis2())],
-                                       text_size = input.ind_text_size(),
-                                       ind_sup = ind_sup,
-                                       quali_sup = quali_sup,
-                                       lim_contrib = input.ind_lim_contrib(),
-                                       lim_cos2 = input.ind_lim_cos2(),
-                                       title = input.ind_title(),
-                                       habillage= input.ind_text_var_qual_color(),
-                                       add_ellipse=input.ind_text_add_ellipse(),
                                        repel=input.ind_plot_repel())
                 return fig+pn.theme_gray()
 
-            @render.plot(alt="Individuals - MFA")
+            @render.plot(alt="Individuals - MFACT")
             def fviz_ind_plot():
                 return plot_ind().draw()
             
@@ -474,55 +365,55 @@ class MFAshiny(Base):
             #    return plot_ind().save("Individuals-Factor-Map.png")
             
             #---------------------------------------------------------------------------------------------
-            ##  Correlation circle - MFA
+            ##  Contingency tables - MFACT
             #---------------------------------------------------------------------------------------------
             @reactive.Calc
-            def plot_var():
+            def plot_freq():
                 # Define boolean 
-                if hasattr(model, "quanti_var_sup_"):
-                    quanti_sup = True
+                if hasattr(model, "freq_sup_"):
+                    freq_sup = True
                 else:
-                    quanti_sup = False
+                    freq_sup = False
                 
-                if input.var_text_color() == "actif/sup":
-                    if hasattr(model, "quanti_var_sup_"):
-                        color_sup = input.var_text_sup_color()
+                if input.freq_text_color() == "actif/sup":
+                    if hasattr(model, "freq_sup_"):
+                        color_sup = input.freq_text_sup_color()
                     else:
                         color_sup = None
                     
-                    fig = fviz_mfa_var(self=model,
+                    fig = fviz_mfa_freq(self=model,
                                        axis=[int(input.axis1()),int(input.axis2())],
-                                       title=input.var_title(),
-                                       color=input.var_text_actif_color(),
-                                       quanti_sup=quanti_sup,
+                                       title=input.freq_title(),
+                                       color=input.freq_text_actif_color(),
+                                       freq_sup=freq_sup,
                                        color_sup=color_sup,
-                                       text_size=input.var_text_size(),
-                                       lim_contrib = input.var_lim_contrib(),
-                                       lim_cos2 = input.var_lim_cos2())
-                elif input.var_text_color() in ["cos2","contrib","group"]:
-                    fig = fviz_mfa_var(self=model,
+                                       text_size=input.freq_text_size(),
+                                       lim_contrib = input.freq_lim_contrib(),
+                                       lim_cos2 = input.freq_lim_cos2())
+                elif input.freq_text_color() in ["cos2","contrib","group"]:
+                    fig = fviz_mfa_freq(self=model,
                                        axis=[int(input.axis1()),int(input.axis2())],
-                                       title=input.var_title(),
-                                       color=input.var_text_color(),
-                                       quanti_sup=quanti_sup,
-                                       text_size=input.var_text_size(),
-                                       lim_contrib = input.var_lim_contrib(),
-                                       lim_cos2 = input.var_lim_cos2())
-                elif input.var_text_color() == "kmeans":
-                    kmeans = KMeans(n_clusters=input.var_text_kmeans_nb_clusters(), random_state=np.random.seed(123), n_init="auto").fit(model.quanti_var_["coord"])
-                    fig = fviz_mfa_var(self=model,
+                                       title=input.freq_title(),
+                                       color=input.freq_text_color(),
+                                       freq_sup=freq_sup,
+                                       text_size=input.freq_text_size(),
+                                       lim_contrib = input.freq_lim_contrib(),
+                                       lim_cos2 = input.freq_lim_cos2())
+                elif input.freq_text_color() == "kmeans":
+                    kmeans = KMeans(n_clusters=input.freq_text_kmeans_nb_clusters(), random_state=np.random.seed(123), n_init="auto").fit(model.freq_["coord"])
+                    fig = fviz_mfa_freq(self=model,
                                        axis=[int(input.axis1()),int(input.axis2())],
-                                       title=input.var_title(),
+                                       title=input.freq_title(),
                                        color=kmeans,
-                                       quanti_sup=quanti_sup,
-                                       text_size=input.var_text_size(),
-                                       lim_contrib = input.var_lim_contrib(),
-                                       lim_cos2 = input.var_lim_cos2())
+                                       freq_sup=freq_sup,
+                                       text_size=input.freq_text_size(),
+                                       lim_contrib = input.freq_lim_contrib(),
+                                       lim_cos2 = input.freq_lim_cos2())
                 return fig+pn.theme_gray()
 
-            @render.plot(alt="Correlation circle - MFA")
-            def fviz_var_plot():
-                return plot_var().draw()
+            @render.plot(alt="Contingency tables - MFACT")
+            def fviz_freq_plot():
+                return plot_freq().draw()
             
             #-----------------------------------------------------------------
             # Groups Factor Map
@@ -567,7 +458,7 @@ class MFAshiny(Base):
                                          repel=input.group_plot_repel())
                 return fig+pn.theme_gray()
             
-            @render.plot(alt="Groups Factor Map - MFA")
+            @render.plot(alt="Groups Factor Map - MFACT")
             def fviz_group_plot():
                 return plot_group().draw()
             
@@ -590,7 +481,7 @@ class MFAshiny(Base):
                                         text_size=input.axes_text_size())
                 return fig+pn.theme_gray()
             
-            @render.plot(alt="Axes partiels Factor Map - MFA")
+            @render.plot(alt="Axes partiels Factor Map - MFACT")
             def fviz_axes_plot():
                 return plot_axes().draw()
             
@@ -614,148 +505,89 @@ class MFAshiny(Base):
             #     yield eigen_table.data_view().to_excel(excel_writer=list[FileInfo][0]["datapath"],index=False)
             
             #----------------------------------------------------------------------------------------------------------------------------------------------
-            ## Quantitatives variables informations
+            ## frequences informations
             #----------------------------------------------------------------------------------------------------------------------------------------------
-            # Quantitative variables Coordinates
+            # Factor Coordinates
             @render.data_frame
-            def quanti_var_coord_table():
-                quanti_var_coord = model.quanti_var_["coord"].round(4).reset_index()
-                quanti_var_coord.columns = ["Variables", *quanti_var_coord.columns[1:]]
-                return DataTable(data=match_datalength(data=quanti_var_coord,value=input.quanti_var_coord_len()),filters=input.quanti_var_coord_filter())
+            def freq_coord_table():
+                freq_coord = model.freq_["coord"].round(4).reset_index()
+                freq_coord.columns = ["Frequences", *freq_coord.columns[1:]]
+                return DataTable(data=match_datalength(data=freq_coord,value=input.freq_coord_len()),filters=input.freq_coord_filter())
             
-            # Quantitative variables Contributions
+            # Contributions
             @render.data_frame
-            def quanti_var_contrib_table():
-                quanti_var_contrib = model.quanti_var_["contrib"].round(4).reset_index()
-                quanti_var_contrib.columns = ["Variables", *quanti_var_contrib.columns[1:]]
-                return  DataTable(data=match_datalength(data=quanti_var_contrib,value=input.quanti_var_contrib_len()),filters=input.quanti_var_contrib_filter())
+            def freq_contrib_table():
+                freq_contrib = model.freq_["contrib"].round(4).reset_index()
+                freq_contrib.columns = ["Frequences", *freq_contrib.columns[1:]]
+                return  DataTable(data=match_datalength(data=freq_contrib,value=input.freq_contrib_len()),filters=input.freq_contrib_filter())
             
-            # Add Variables Contributions Modal Show
+            # Add frequences Contributions Modal Show
             @reactive.Effect
-            @reactive.event(input.quanti_var_contrib_graph_btn)
+            @reactive.event(input.freq_contrib_graph_btn)
             def _():
-                graph_modal_show(text="quanti_var",name="contrib",max_axis=model.call_["n_components"])
+                graph_modal_show(text="freq",name="contrib",max_axis=model.call_["n_components"])
             
             @reactive.Calc
-            def quanti_var_contrib_plot():
-                fig = fviz_contrib(self=model,choice="quanti_var",axis=input.quanti_var_contrib_axis(),top_contrib=int(input.quanti_var_contrib_top()),color=input.quanti_var_contrib_color(),bar_width=input.quanti_var_contrib_bar_width(),ggtheme=pn.theme_gray())
+            def freq_contrib_plot():
+                fig = fviz_contrib(self=model,choice="freq",axis=input.freq_contrib_axis(),top_contrib=int(input.freq_contrib_top()),color=input.freq_contrib_color(),bar_width=input.freq_contrib_bar_width(),ggtheme=pn.theme_gray())
                 return fig
 
             # Plot variables Contributions
-            @render.plot(alt="Quantitative variables Contributions Map - MFA")
-            def fviz_quanti_var_contrib():
-                return quanti_var_contrib_plot().draw()
+            @render.plot(alt="Frequences Contributions Map - MFACT")
+            def fviz_freq_contrib():
+                return freq_contrib_plot().draw()
             
-            # Quantitative Variables Cos2 
+            # Square cosinus 
             @render.data_frame
-            def quanti_var_cos2_table():
-                quanti_var_cos2 = model.quanti_var_["cos2"].round(4).reset_index()
-                quanti_var_cos2.columns = ["Variables", *quanti_var_cos2.columns[1:]]
-                return  DataTable(data=match_datalength(data=quanti_var_cos2,value=input.quanti_var_cos2_len()),filters=input.quanti_var_cos2_filter())
+            def freq_cos2_table():
+                freq_cos2 = model.freq_["cos2"].round(4).reset_index()
+                freq_cos2.columns = ["Variables", *freq_cos2.columns[1:]]
+                return  DataTable(data=match_datalength(data=freq_cos2,value=input.freq_cos2_len()),filters=input.freq_cos2_filter())
             
-            # Add Variables Cos2 Modal Show
+            # Add frequences  Cos2 Modal Show
             @reactive.Effect
-            @reactive.event(input.quanti_var_cos2_graph_btn)
+            @reactive.event(input.freq_cos2_graph_btn)
             def _():
-                graph_modal_show(text="quanti_var",name="cos2",max_axis=model.call_["n_components"])
+                graph_modal_show(text="freq",name="cos2",max_axis=model.call_["n_components"])
             
             @reactive.Calc
-            def quanti_var_cos2_plot():
-                fig = fviz_cos2(self=model,choice="quanti_var",axis=input.quanti_var_cos2_axis(),top_cos2=int(input.quanti_var_cos2_top()),color=input.quanti_var_cos2_color(),bar_width=input.quanti_var_cos2_bar_width(),ggtheme=pn.theme_gray())
+            def freq_cos2_plot():
+                fig = fviz_cos2(self=model,choice="freq",axis=input.freq_cos2_axis(),top_cos2=int(input.freq_cos2_top()),color=input.freq_cos2_color(),bar_width=input.freq_cos2_bar_width(),ggtheme=pn.theme_gray())
                 return fig
 
             # Plot variables Cos2
-            @render.plot(alt="Quantitative variables cosines Map - MFA")
-            def fviz_quanti_var_cos2():
-                return quanti_var_cos2_plot().draw()
-            
-            # Quantitative variables Correlations
-            @render.data_frame
-            def quanti_var_cor_table():
-                quanti_var_cor = model.quanti_var_["cor"].round(4).reset_index()
-                quanti_var_cor.columns = ["Variables", *quanti_var_cor.columns[1:]]
-                return DataTable(data=match_datalength(data=quanti_var_cor,value=input.quanti_var_cor_len()),filters=input.quanti_var_cor_filter())
+            @render.plot(alt="Frequences cosines Map - MFACT")
+            def fviz_freq_cos2():
+                return freq_cos2_plot().draw()
 
             #---------------------------------------------------------------------------------
-            ## Supplementary Continuous Variables
+            ## Supplementary frequences
             #---------------------------------------------------------------------------------
-            # Add Continuous Supplementary Conditional Panel
-            if hasattr(model,"quanti_var_sup_"):
+            if hasattr(model,"freq_sup_"):
                 @render.ui
-                def quanti_var_sup_panel():
-                    return ui.panel_conditional("input.value_choice == 'quanti_var_sup_res'",
-                                ui.input_radio_buttons(id="quanti_var_sup_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
-                                ui.panel_conditional("input.quanti_var_sup_choice === 'coord'",panel_conditional1(text="quanti_var_sup",name="coord")),
-                                ui.panel_conditional("input.quanti_var_sup_choice === 'cos2'",panel_conditional1(text="quanti_var_sup",name="cos2"))
+                def freq_sup_panel():
+                    return ui.panel_conditional("input.value_choice == 'freq_sup_res'",
+                                ui.input_radio_buttons(id="freq_sup_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","cos2":"Cos2 - Qualité de la représentation"},selected="coord",width="100%",inline=True),
+                                ui.panel_conditional("input.freq_sup_choice === 'coord'",panel_conditional1(text="freq_sup",name="coord")),
+                                ui.panel_conditional("input.freq_sup_choice === 'cos2'",panel_conditional1(text="freq_sup",name="cos2"))
                             )
                 
-                # Continuous Variables Coordinates
+                # Factor coordinates
                 @render.data_frame
-                def quanti_var_sup_coord_table():
-                    quanti_var_sup_coord = model.quanti_var_sup_["coord"].round(4).reset_index()
-                    quanti_var_sup_coord.columns = ["Variables", *quanti_var_sup_coord.columns[1:]]
-                    return DataTable(data=match_datalength(data=quanti_var_sup_coord,value=input.quanti_var_sup_coord_len()),filters=input.quanti_var_sup_coord_filter())
+                def freq_sup_coord_table():
+                    freq_sup_coord = model.freq_sup_["coord"].round(4).reset_index()
+                    freq_sup_coord.columns = ["Variables", *freq_sup_coord.columns[1:]]
+                    return DataTable(data=match_datalength(data=freq_sup_coord,value=input.freq_sup_coord_len()),filters=input.freq_sup_coord_filter())
                 
-                # Supplementary Cosinus
+                # Square cosinus
                 @render.data_frame
-                def quanti_var_sup_cos2_table():
-                    quanti_var_sup_cos2 = model.quanti_var_sup_["cos2"].round(4).reset_index()
-                    quanti_var_sup_cos2.columns = ["Variables", *quanti_var_sup_cos2.columns[1:]]
-                    return DataTable(data=match_datalength(data=quanti_var_sup_cos2,value=input.quanti_var_sup_cos2_len()),filters=input.quanti_var_sup_cos2_filter())
+                def freq_sup_cos2_table():
+                    freq_sup_cos2 = model.freq_sup_["cos2"].round(4).reset_index()
+                    freq_sup_cos2.columns = ["Variables", *freq_sup_cos2.columns[1:]]
+                    return DataTable(data=match_datalength(data=freq_sup_cos2,value=input.freq_sup_cos2_len()),filters=input.freq_sup_cos2_filter())
             
-            #------------------------------------------------------------------------------------------
-            # Supplementary qualitatives variables
-            ##-----------------------------------------------------------------------------------------
-            # Add Categories Supplementary Conditional Panel
-            if hasattr(model,"quali_var_sup_"):
-                @render.ui
-                def quali_var_sup_panel():
-                    return ui.panel_conditional("input.value_choice == 'quali_var_sup_res'",
-                                ui.input_radio_buttons(id="quali_var_sup_choice",label=ui.h6("Quel type de résultats?"),choices={"coord":"Coordonnées","cos2":"Cos2 - Qualité de la représentation","vtest":"Value-test","eta2" : "Eta2 - Rapport de corrélation","coord_partial":"Partial coordinates"},selected="coord",width="100%",inline=True),
-                                ui.panel_conditional("input.quali_var_sup_choice === 'coord'",panel_conditional1(text="quali_var_sup",name="coord")),
-                                ui.panel_conditional("input.quali_var_sup_choice === 'cos2'",panel_conditional1(text="quali_var_sup",name="cos2")),
-                                ui.panel_conditional("input.quali_var_sup_choice === 'vtest'",panel_conditional1(text="quali_var_sup",name="vtest")),
-                                ui.panel_conditional("input.quali_var_sup_choice === 'eta2'",panel_conditional1(text="quali_var_sup",name="eta2")),
-                                ui.panel_conditional("input.quali_var_sup_choice === 'coord_partial'",panel_conditional1(text="quali_var_sup",name="coord_partial"))
-                            )
-                
-                # Supplementary qualitatives variables coordinates
-                @render.data_frame
-                def quali_var_sup_coord_table():
-                    quali_var_sup_coord = model.quali_var_sup_["coord"].round(4).reset_index()
-                    quali_var_sup_coord.columns = ["Categories", *quali_var_sup_coord.columns[1:]]
-                    return  DataTable(data = match_datalength(quali_var_sup_coord,input.quali_var_sup_coord_len()),filters=input.quali_var_sup_coord_filter())
-                
-                # Supplementary qualitatives variables cos2
-                @render.data_frame
-                def quali_var_sup_cos2_table():
-                    quali_var_sup_cos2 = model.quali_var_sup_["cos2"].round(4).reset_index()
-                    quali_var_sup_cos2.columns = ["Categories", *quali_var_sup_cos2.columns[1:]]
-                    return  DataTable(data = match_datalength(quali_var_sup_cos2,input.quali_var_sup_cos2_len()),filters=input.quali_var_sup_cos2_filter())
-                
-                # Value - Test categories variables
-                @render.data_frame
-                def quali_var_sup_vtest_table():
-                    quali_var_sup_vtest = model.quali_var_sup_["vtest"].round(4).reset_index()
-                    quali_var_sup_vtest.columns = ["Categories", *quali_var_sup_vtest.columns[1:]]
-                    return  DataTable(data = match_datalength(quali_var_sup_vtest,input.quali_var_sup_vtest_len()),filters=input.quali_var_sup_vtest_filter())
-                
-                # Value - Test categories variables
-                @render.data_frame
-                def quali_var_sup_eta2_table():
-                    quali_var_sup_eta2 = model.quali_var_sup_["eta2"].round(4).reset_index()
-                    quali_var_sup_eta2.columns = ["Variables", *quali_var_sup_eta2.columns[1:]]
-                    return  DataTable(data = match_datalength(quali_var_sup_eta2,input.quali_var_sup_eta2_len()),filters=input.quali_var_sup_eta2_filter())
-                
-                # Partiel coordinates
-                @render.data_frame
-                def quali_var_sup_coord_partial_table():
-                    quali_var_sup_coord_partial = reset_columns(X=model.quali_var_sup_["coord_partiel"].round(4)).reset_index()
-                    quali_var_sup_coord_partial.columns = ["Categories", *quali_var_sup_coord_partial.columns[1:]]
-                    return  DataTable(data = match_datalength(quali_var_sup_coord_partial,input.quali_var_sup_coord_partial_len()),filters=input.quali_var_sup_coord_partial_filter())
-                
             #--------------------------------------------------------------------------------------------------------
-            # Individuals informations
+            ## Individuals informations
             #---------------------------------------------------------------------------------------------------------
             # Individuals Coordinates
             @render.data_frame
@@ -783,7 +615,7 @@ class MFAshiny(Base):
                 return fig
 
             # Plot Individuals Contributions
-            @render.plot(alt="Individuals Contributions Map - MFA")
+            @render.plot(alt="Individuals Contributions Map - MFACT")
             def fviz_ind_contrib():
                 return ind_contrib_plot().draw()
             
@@ -806,7 +638,7 @@ class MFAshiny(Base):
                 return fig
 
             # Plot variables Cos2
-            @render.plot(alt="Individuals Cosines Map - MFA")
+            @render.plot(alt="Individuals Cosines Map - MFACT")
             def fviz_ind_cos2(): 
                 return ind_cos2_plot().draw()
             
@@ -909,7 +741,7 @@ class MFAshiny(Base):
                 return fig
 
             # Plot Individuals Contributions
-            @render.plot(alt="Group Contributions Map - MFA")
+            @render.plot(alt="Group Contributions Map - MFACT")
             def fviz_group_contrib():
                 return group_contrib_plot().draw()
             
@@ -932,7 +764,7 @@ class MFAshiny(Base):
                 return fig
 
             # Plot Group cos2
-            @render.plot(alt="Group Cosines Map - MFA")
+            @render.plot(alt="Group Cosines Map - MFACT")
             def fviz_group_cos2(): 
                 return group_cos2_plot().draw()
             
@@ -1006,7 +838,7 @@ class MFAshiny(Base):
                 return fig
 
             # Plot Individuals Contributions
-            @render.plot(alt="Axes partiels Contributions Map - MFA")
+            @render.plot(alt="Axes partiels Contributions Map - MFACT")
             def fviz_axes_contrib():
                 return axes_contrib_plot().draw()
             
@@ -1060,75 +892,12 @@ class MFAshiny(Base):
             #-----------------------------------------------------------------------------------------------
             ## Summary of data
             #--------------------------------------------------------------------------------------------------
-            # Data
-            @reactive.Calc
-            def data():
-                data = model.call_["Xtot"].loc[:,var_labels]
-                if hasattr(model,"ind_sup_"):
-                    data = data.drop(index=model.call_["ind_sup"])
-                return data
-
             # Descriptive statistics
             @render.data_frame
             def stats_desc_table():
-                stats_desc = data().describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
+                stats_desc = model.call_["Xtot"].describe(include="all").round(4).T.reset_index().rename(columns={"index":"Variables"})
                 return  DataTable(data = match_datalength(stats_desc,input.stats_desc_len()),filters=input.stats_desc_filter())
 
-            # Histogram for quantitatives variables
-            @reactive.Calc
-            def plot_hist():
-                p = pn.ggplot(data(),pn.aes(x=input.var_label()))
-                # Add density
-                if input.add_density():
-                    p = p + pn.geom_histogram(pn.aes(y="..density.."), color="black", fill="gray")+pn.geom_density(alpha=.2, fill="#FF6666")
-                else:
-                    p = p + pn.geom_histogram(color="black", fill="gray")
-                return p + pn.ggtitle(f"Histogram de {input.var_label()}")
-
-            @render.plot(alt="Histogram - MFA")
-            def fviz_hist_plot():
-                return plot_hist().draw()
-
-            # Pearson corelation matrix
-            @render.data_frame
-            def corr_matrix_table():
-                corr_mat = data().corr(method="pearson").round(4).reset_index().rename(columns={"index":"Variables"})
-                return DataTable(data = match_datalength(corr_mat,input.corr_matrix_len()),filters=input.corr_matrix_filter())
-
-            # Bar plot for supplementary qualitatives variables
-            if hasattr(model,"quali_var_sup_"):
-                quali_var_sup_labels = model.quali_var_sup_["eta2"].index.tolist()
-                @render.ui
-                def quali_sup_graph():
-                    return ui.panel_conditional("input.resume_choice === 'bar_plot'",
-                            ui.row(
-                                ui.column(2,
-                                    ui.input_select(id="quali_var_sup_label",label=ui.h6("Choisir une variable"),choices={x:x for x in quali_var_sup_labels},selected=quali_var_sup_labels[0],multiple=False,width="100%")
-                                ),
-                                ui.column(10,
-                                    ui.div(ui.output_plot(id="fviz_bar_plot",width='100%',height='500px'),align="center"),
-                                    ui.hr(),
-                                    ui.div(ui.h6("Téléchargement"),style="display: inline-block;padding: 5px",align="center"),
-                                    ui.div(ui.download_button(id="download_bar_plot_jpg",label="jpg",style = download_btn_style),style="display: inline-block;",align="center"),
-                                    ui.div(ui.download_button(id="download_bar_plot_png",label="png",style = download_btn_style),style="display: inline-block;",align="center"),
-                                    ui.div(ui.download_button(id="download_bar_plot_pdf",label="pdf",style = download_btn_style),style="display: inline-block;",align="center"),
-                                    align="center"
-                                )
-                            )
-                        )
-
-                @reactive.Calc
-                def plot_bar():
-                    data = model.call_["Xtot"].loc[:,quali_var_sup_labels].astype("object")
-                    if model.ind_sup is not None:
-                        data = data.drop(index=model.call_["ind_sup"])
-                    return pn.ggplot(data,pn.aes(x=input.quali_var_sup_label()))+ pn.geom_bar(color="black",fill="gray")
-
-                # Diagramme en barres
-                @render.plot(alt="Bar-Plot")
-                def fviz_bar_plot():
-                    return plot_bar().draw()
-            
             #-----------------------------------------------------------------------------------------------------------------------
             # Overall Data
             #-----------------------------------------------------------------------------------------------------------------------

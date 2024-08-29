@@ -24,10 +24,10 @@ scientistshiny requires :
 
 ```bash
 scientisttools>=0.1.6
-numpy>=1.26.2
-matplotlib>=3.5.3
+numpy>=1.26.4
+matplotlib>=3.8.4
 scikit-learn>=1.2.2
-pandas>=1.5.3
+pandas>=2.2.3
 plotnine>=0.10.1
 ```
 
@@ -42,9 +42,11 @@ pip install scientistshiny
 ## 3 Example with `PCAshiny`
 
 ```python
+# Load dataset and functions
 from scientisttools import PCA, load_decathlon2
 from scientistshiny import PCAshiny
 decathlon = load_decathlon2()
+
 # PCA with scientistshiny
 res_shiny = PCAshiny(model = decathlon)
 res_shiny.run()
